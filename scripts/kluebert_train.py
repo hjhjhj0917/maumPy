@@ -84,7 +84,20 @@ def get_analysis_summary(final_level):
     return summary_map.get(final_level, "분석 결과 없음")
 
 
-# 예측 함수
+# 가중치 손실 함수 적용을 위한 Custom Trainer 정의
+class WeightedLossTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        labels = inputs.get("labels")
+        outputs = model(**inputs)
+        logits = outputs.get("logits")
+        # 클래스별 불균형 해결을 위한 가중치 (정상 데이터에 대한 판단 기준 강화)
+        weights = torch.tensor([1.0, 2.0, 2.0, 2.5]).to(device)
+        loss_fct = nn.CrossEntropyLoss(weight=weights)
+        loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
+        return (loss, outputs) if return_outputs else loss
+
+
+# 예측 함수 (임계값 튜닝 적용)
 def predict(sentence, model, tokenizer):
     inputs = tokenizer(sentence, return_tensors="pt", truncation=True, max_length=512)
     inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -93,17 +106,25 @@ def predict(sentence, model, tokenizer):
         outputs = model(**inputs)
 
     probs = torch.softmax(outputs.logits, dim=-1).squeeze()
-    final_level = int(torch.argmax(probs).item())
     raw_score = float(sum(i * prob for i, prob in enumerate(probs)))
 
-    result = {
+    # 가중 평균 점수 기반의 임계값 튜닝
+    if raw_score < 0.6:
+        final_level = 0
+    elif raw_score < 1.5:
+        final_level = 1
+    elif raw_score < 2.3:
+        final_level = 2
+    else:
+        final_level = 3
+
+    return {
         "disease_type": disease,
         "final_level": final_level,
         "raw_score": round(raw_score, 4),
         "is_symptom": final_level != 0,
         "analysis_summary": get_analysis_summary(final_level)
     }
-    return result
 
 
 # 폴더 경로 설정
@@ -155,11 +176,10 @@ df.to_excel(disease + '_data.xlsx', index=False)
 df_normal = df[df['label'] == 0]
 df_dep = df[df['label'] > 0]
 
-df_normal_sampled = df_normal.sample(n=len(df_dep), random_state=42)
-df_balanced = pd.concat([df_normal_sampled, df_dep]).sample(frac=1, random_state=42).reset_index(drop=True)
-df = df_balanced
-
-print(f"✅ 밸런싱 완료! 정상 데이터: {len(df_normal_sampled)}개 | 우울증 데이터: {len(df_dep)}개")
+# 데이터 증강 효과를 위해 정상 데이터 샘플링 비중 확대 (정상 범위 확장)
+sample_size = min(len(df_normal), int(len(df_dep) * 1.5))
+df_balanced = pd.concat([df_normal.sample(n=sample_size, random_state=42), df_dep]).sample(frac=1, random_state=42).reset_index(drop=True)
+print(f"✅ 밸런싱 완료! 정상: {sample_size}개 | 우울: {len(df_dep)}개")
 
 # 데이터셋 분할
 train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)  # 0.2 -> None (test 폴더가 별도로 분할되어 있는 경우)
@@ -210,9 +230,9 @@ training_args = TrainingArguments(
     report_to=[]
 )
 
-# Trainer 초기화
+# Trainer 초기화 (Custom WeightedLossTrainer 사용)
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-trainer = Trainer(
+trainer = WeightedLossTrainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
