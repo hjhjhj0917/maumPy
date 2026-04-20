@@ -1,44 +1,39 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
+
 from app.services.prediction import analyze_diary
-from app.services.emotion import analyze_emotions
+from app.services.emotion import analyze_emotions # 이제 함수가 존재하므로 에러 안 남
 
 router = APIRouter()
 
-
-# 스프링부트에서 받을 데이터 형식
 class DiaryRequest(BaseModel):
     content: str
     disease_type: str = "depression"
 
-
-# 스프링부트로 돌려줄 합쳐진 데이터 형식
 class DiaryResponse(BaseModel):
     analysis_summary: str
-    dep_res: dict
     main_emotion: str
-    emotions_detail: List[Dict[str, Any]]
-
+    main_color: str
+    dep_res: dict
 
 @router.post("/api/analyze", response_model=DiaryResponse)
 async def analyze_text(request: DiaryRequest):
     try:
-        # 1. 우울증 분석 실행
-        dep_result = analyze_diary(request.content, request.disease_type)
+        # 1. 우울증 분석 (prediction.py 호출)
+        dep_data = analyze_diary(request.content, request.disease_type)
 
-        # 2. 감정 분석 실행
-        emo_result = analyze_emotions(request.content)
+        # 2. 감정 분석 (emotion.py 호출)
+        emo_data = analyze_emotions(request.content)
 
-        # 가장 점수가 높은 감정을 대표 감정으로 설정
-        main_emotion = emo_result[0]['emotion'] if emo_result else "없음"
-
-        # 3. 합쳐서 반환
+        # 3. 합쳐서 Spring 서버 형식으로 반환
         return DiaryResponse(
-            analysis_summary=dep_result["ANALYSIS_SUM"],
-            dep_res=dep_result["DEP_RES"],
-            main_emotion=main_emotion,
-            emotions_detail=emo_result  # 44개 감정 리스트 전체
+            analysis_summary=dep_data["summary"],
+            main_emotion=emo_data["main_emotion"],
+            main_color=emo_data["main_color"],
+            dep_res=dep_data["dep_res"]
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
