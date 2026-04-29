@@ -2,8 +2,6 @@ from fastapi import FastAPI
 from app.api import analyze
 import uvicorn
 
-# 수정된 서비스들에서 모델 로드 함수 가져오기
-# emotion.py와 prediction.py에 해당 함수가 정의되어 있어야 합니다.
 from app.services.prediction import analyze_diary
 from app.services.emotion import analyze_emotions
 
@@ -12,6 +10,7 @@ app = FastAPI()
 # 분석 라우터 등록
 app.include_router(analyze.router)
 
+# @app.on_event("startup"): 서버가 완전히 켜지기 직전에 실행되는 함수입니다.
 @app.on_event("startup")
 async def startup_event():
     print("--- 서버 부팅 중: AI 모델을 메모리에 적재합니다 ---")
@@ -27,8 +26,11 @@ async def startup_event():
 
 @app.get("/")
 async def root():
+    # 서버 접속 시 가장 먼저 보이는 화면 (Health Check)
     return {"message": "Maum AI Server is running"}
 
 if __name__ == "__main__":
-    # 포트 번호는 준모님이 설정하신 8000번 그대로 유지합니다.
+    # host="0.0.0.0": 외부 장치(예: Spring 서버, 모바일 앱)에서 이 서버에 접속할 수 있도록 모든 IP의 접근을 허용합니다. 개발 편의를 위한 포트 설정
+    # port=8000: 서버가 통신에 사용할 포트 번호입니다.
+    # reload=True: 코드를 수정하고 저장하면 서버가 자동으로 재시작되는 개발 편의 기능입니다.
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

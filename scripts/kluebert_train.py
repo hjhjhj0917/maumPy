@@ -90,6 +90,7 @@ class WeightedLossTrainer(Trainer):
         labels = inputs.get("labels")
         outputs = model(**inputs)
         logits = outputs.get("logits")
+
         # 클래스별 불균형 해결을 위한 가중치 (정상 데이터에 대한 판단 기준 강화)
         weights = torch.tensor([1.0, 2.0, 2.0, 2.5]).to(device)
         loss_fct = nn.CrossEntropyLoss(weight=weights)
@@ -179,7 +180,7 @@ df_dep = df[df['label'] > 0]
 # 데이터 증강 효과를 위해 정상 데이터 샘플링 비중 확대 (정상 범위 확장)
 sample_size = min(len(df_normal), int(len(df_dep) * 1.5))
 df_balanced = pd.concat([df_normal.sample(n=sample_size, random_state=42), df_dep]).sample(frac=1, random_state=42).reset_index(drop=True)
-print(f"✅ 밸런싱 완료! 정상: {sample_size}개 | 우울: {len(df_dep)}개")
+print(f"밸런싱 완료! 정상: {sample_size}개 | 우울: {len(df_dep)}개")
 
 # 데이터셋 분할
 train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)  # 0.2 -> None (test 폴더가 별도로 분할되어 있는 경우)
