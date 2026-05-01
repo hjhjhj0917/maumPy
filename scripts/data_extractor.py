@@ -4,9 +4,7 @@ import shutil
 
 
 def extract_and_move_jsons(source_dir, target_dir):
-    """
-    여러 ZIP 파일을 탐색하여 JSON 파일만 추출한 뒤 target_dir로 이동하는 함수
-    """
+
     if not os.path.exists(target_dir):
         os.makedirs(target_dir)
 
@@ -15,7 +13,6 @@ def extract_and_move_jsons(source_dir, target_dir):
 
     print(f"[{source_dir}] 탐색 시작...")
 
-    # source_dir 하위의 모든 파일 탐색
     for root, dirs, files in os.walk(source_dir):
         for file in files:
             if file.endswith('.zip'):
@@ -25,17 +22,13 @@ def extract_and_move_jsons(source_dir, target_dir):
                 try:
                     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                         for member in zip_ref.namelist():
-                            # 맥 OS 압축 잔여물이나 폴더 제외하고 순수 .json 파일만 타겟
                             if member.endswith('.json') and not member.startswith('__MACOSX'):
-                                # 파일 이름만 추출
                                 filename = os.path.basename(member)
                                 if not filename: continue
 
-                                # 중복 방지를 위해 [압축파일명_원래파일.json] 형태로 이름 변경
                                 safe_name = f"{os.path.splitext(file)[0]}_{filename}"
                                 target_path = os.path.join(target_dir, safe_name)
 
-                                # 압축 해제 및 이동
                                 with zip_ref.open(member) as source, open(target_path, "wb") as target:
                                     shutil.copyfileobj(source, target)
                                 json_count += 1

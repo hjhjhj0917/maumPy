@@ -23,24 +23,19 @@ from datasets import Dataset
 from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments, \
     DataCollatorWithPadding
 
-# GPU 또는 CPU 장치 설정
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# 타임스탬프 출력
 print("실행 시각:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-# CPU 사양
 print("\n1. CPU 사양")
 print(platform.processor())
 
-# GPU 사양 (GPU가 연결된 경우에만 출력됩니다)
 print("\n2. GPU 사양")
 if torch.cuda.is_available():
     print(torch.cuda.get_device_name(0))
 else:
     print("GPU 없음")
 
-# RAM 사양
 print("\n3. RAM 사양")
 try:
     import psutil
@@ -50,7 +45,6 @@ try:
 except ImportError:
     print("psutil 미설치")
 
-# HDD 용량
 print("\n4. HDD 용량")
 try:
     import shutil
@@ -60,16 +54,13 @@ try:
 except Exception as e:
     print(e)
 
-# OS 버전
 print("\n5. OS 버전")
 print(platform.platform())
 
-# pytorch 버전
 print("\n6. 프레임워크 버전")
 print(torch.__version__)
 
 
-# 데이터셋 토큰화 함수 정의
 def tokenize_function(examples):
     return tokenizer(examples['input'], truncation=True, max_length=512)
 
@@ -84,21 +75,18 @@ def get_analysis_summary(final_level):
     return summary_map.get(final_level, "분석 결과 없음")
 
 
-# 가중치 손실 함수 적용을 위한 Custom Trainer 정의
 class WeightedLossTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.get("labels")
         outputs = model(**inputs)
         logits = outputs.get("logits")
 
-        # 클래스별 불균형 해결을 위한 가중치 (정상 데이터에 대한 판단 기준 강화)
         weights = torch.tensor([1.0, 2.0, 2.0, 2.5]).to(device)
         loss_fct = nn.CrossEntropyLoss(weight=weights)
         loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
         return (loss, outputs) if return_outputs else loss
 
 
-# 예측 함수 (임계값 튜닝 적용)
 def predict(sentence, model, tokenizer):
     inputs = tokenizer(sentence, return_tensors="pt", truncation=True, max_length=512)
     inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -109,7 +97,6 @@ def predict(sentence, model, tokenizer):
     probs = torch.softmax(outputs.logits, dim=-1).squeeze()
     raw_score = float(sum(i * prob for i, prob in enumerate(probs)))
 
-    # 가중 평균 점수 기반의 임계값 튜닝
     if raw_score < 0.6:
         final_level = 0
     elif raw_score < 1.5:
@@ -128,13 +115,10 @@ def predict(sentence, model, tokenizer):
     }
 
 
-# 폴더 경로 설정
-folder_path = './data/training'  # 폴더 내 training 데이터셋이 있는 경로 설정
+folder_path = './data/training'
 
-# 폴더 내 addiction 관련 JSON 파일 리스트 가져오기
 json_files = [f for f in os.listdir(folder_path) if f.endswith('.json')]
 
-# JSON 파일 하나씩 열어서 데이터 가져오기
 labels = []
 txts = []
 valid_json_files = []
@@ -177,28 +161,22 @@ df.to_excel(disease + '_data.xlsx', index=False)
 df_normal = df[df['label'] == 0]
 df_dep = df[df['label'] > 0]
 
-# 데이터 증강 효과를 위해 정상 데이터 샘플링 비중 확대 (정상 범위 확장)
 sample_size = min(len(df_normal), int(len(df_dep) * 1.5))
 df_balanced = pd.concat([df_normal.sample(n=sample_size, random_state=42), df_dep]).sample(frac=1, random_state=42).reset_index(drop=True)
 print(f"밸런싱 완료! 정상: {sample_size}개 | 우울: {len(df_dep)}개")
 
-# 데이터셋 분할
-train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)  # 0.2 -> None (test 폴더가 별도로 분할되어 있는 경우)
+train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
 
-# Hugging Face Dataset 객체로 변환
 train_dataset = Dataset.from_pandas(train_df.reset_index(drop=True))
 test_dataset = Dataset.from_pandas(test_df.reset_index(drop=True))
 
-# KlueBERT 모델 및 토크나이저 로드
 model_name = "klue/bert-base"
 tokenizer = BertTokenizer.from_pretrained(model_name)
 model = BertForSequenceClassification.from_pretrained(model_name, num_labels=4)
 
-# 데이터셋 토큰화
 train_dataset = train_dataset.map(tokenize_function, batched=True)
 test_dataset = test_dataset.map(tokenize_function, batched=True)
 
-# 필요하지 않은 컬럼 제거
 remove_train_columns = [col for col in ['input', 'filename', '__index_level_0__'] if col in train_dataset.column_names]
 remove_test_columns = [col for col in ['input', 'filename', '__index_level_0__'] if col in test_dataset.column_names]
 train_dataset = train_dataset.remove_columns(remove_train_columns)
@@ -207,11 +185,9 @@ test_dataset = test_dataset.remove_columns(remove_test_columns)
 train_dataset = train_dataset.rename_column("label", "labels")
 test_dataset = test_dataset.rename_column("label", "labels")
 
-# 포맷 설정
 train_dataset.set_format('torch')
 test_dataset.set_format('torch')
 
-# TrainingArguments 설정
 training_args = TrainingArguments(
     output_dir="./results",
     eval_strategy="epoch",
@@ -231,7 +207,6 @@ training_args = TrainingArguments(
     report_to=[]
 )
 
-# Trainer 초기화 (Custom WeightedLossTrainer 사용)
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 trainer = WeightedLossTrainer(
     model=model,
@@ -241,36 +216,27 @@ trainer = WeightedLossTrainer(
     data_collator=data_collator
 )
 
-# 모델 학습
 trainer.train()
 
-# 모델 저장
 trainer.save_model("./trained_model_kluebert_" + disease)
 tokenizer.save_pretrained("./trained_model_kluebert_" + disease)
 
-### Playground
 
-# 평가
 trainer.evaluate()
 
-# 예측 예시 (학습된 모델을 사용)
 test_sentence = "비도 오고 그래서 네 생각이 났어"  # 테스트할 문장 입력
 dep_res = predict(test_sentence, model, tokenizer)
 print(f"\nInput: {test_sentence}\nPredicted numbers: {dep_res}")
 
-# 저장된 모델 호출하여 예측 수행
 loaded_model = BertForSequenceClassification.from_pretrained("./trained_model_kluebert_" + disease).to(device)
 loaded_tokenizer = BertTokenizer.from_pretrained("./trained_model_kluebert_" + disease)
 
 loaded_model.eval()
 
-# TEST SET 폴더 입장
-folder_path = './data/test'  # 폴더 내 training 데이터셋이 있는 경로 설정
+folder_path = './data/test'
 
-# 폴더 내 disease 관련 JSON 파일 리스트 가져오기
 test_json_files = [f for f in os.listdir(folder_path) if f.endswith('.json')]
 
-# JSON 파일별 데이터 가져오기
 test_labels = []
 test_txts = []
 valid_test_json_files = []
@@ -311,24 +277,19 @@ test_df = pd.DataFrame({
     'original_label_zeroone': [0 if x == 0 else 1 for x in test_labels]
 })
 
-# 예측 결과를 담을 리스트
 predicted_labels = []
 
-# 각 문장에 대해 예측 수행
 for sentence in test_df['input']:
     dep_res = predict(sentence, loaded_model, loaded_tokenizer)
     predicted_labels.append(dep_res['final_level'])
 
-# 예측 결과를 새로운 컬럼 'predicted_label'에 추가
 test_df['predicted_label'] = predicted_labels
 test_df['predicted_label_zeroone'] = [0 if x == 0 else 1 for x in predicted_labels]
 
 original_label_zeroone = np.array(test_df['original_label_zeroone'])
 predicted_label_zeroone = np.array(test_df['predicted_label_zeroone'])
 
-# 정확도 계산: 예측이 정확한 경우의 수 / 전체 데이터 수
 accuracy_zeroone = np.mean(original_label_zeroone == predicted_label_zeroone)
 
-# 정확도 출력
 print(disease, "0~1")
 print(f"Accuracy: {accuracy_zeroone * 100:.2f}%")
