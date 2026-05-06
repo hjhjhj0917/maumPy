@@ -7,7 +7,12 @@ models = {}
 tokenizers = {}
 
 def get_analysis_summary(final_level):
-    summary_map = {0: "정상 범위 내의 정서 상태", 1: "경미한 우울 증상 의심", 2: "중간 수준의 우울 증상 의심", 3: "심화된 우울 증상 의심"}
+    summary_map = {
+        0: "정상 범위 내의 정서 상태",
+        1: "경미한 우울 증상 의심",
+        2: "중간 수준의 우울 증상 의심",
+        3: "심화된 우울 증상 의심"
+    }
     return summary_map.get(final_level, "분석 결과 없음")
 
 def analyze_diary(content: str, disease_type: str = "depression"):
