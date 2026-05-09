@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.services.prediction import analyze_diary
 from app.services.emotion import analyze_emotions
+from app.services.summary import generate_hcx_summary
 
 router = APIRouter()
 
@@ -22,8 +23,14 @@ async def analyze_text(request: DiaryRequest):
 
         emo_data = analyze_emotions(request.content)
 
+        hcx_summary = generate_hcx_summary(
+            content=request.content,
+            dep_level=dep_data["dep_res"]["final_level"],
+            raw_emotions=emo_data["raw_emotions"]
+        )
+
         return DiaryResponse(
-            analysis_summary=dep_data["summary"],
+            analysis_summary=hcx_summary,
             main_emotion=emo_data["main_emotion"],
             main_color=emo_data["main_color"],
             dep_res=dep_data["dep_res"]
