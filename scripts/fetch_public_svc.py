@@ -1,6 +1,7 @@
 import os
 import requests
 import certifi
+import time
 from datetime import datetime
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -32,10 +33,20 @@ def get_embedding(text):
 
     payload = {"text": text[:1000]}
 
-    response = requests.post(HCX_EMBEDDING_API_URL, headers=headers, json=payload, timeout=5)
-    response.raise_for_status()
+    for attempt in range(3):
+        try:
+            response = requests.post(HCX_EMBEDDING_API_URL, headers=headers, json=payload, timeout=10)
+            response.raise_for_status()
+            return response.json().get('result', {}).get('embedding', [])
 
-    return response.json().get('result', {}).get('embedding', [])
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 429:
+                print(f"  ⏳ API 속도 제한(429). 5초 대기 후 재시도... ({attempt + 1}/3)")
+                time.sleep(5)
+            else:
+                raise e
+
+    return []
 
 
 def fetch_service_detail(svc_id):
@@ -152,6 +163,8 @@ def fetch_and_save_data():
                 )
                 success_count += 1
                 print(f"저장 성공: {svc_nm}")
+
+                time.sleep(0.3)
 
             except requests.exceptions.RequestException as e:
                 print(f"통신 에러 발생 (스킵됨): {item.get('서비스명', 'Unknown')} - {e}")
