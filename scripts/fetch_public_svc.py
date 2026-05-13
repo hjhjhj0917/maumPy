@@ -41,7 +41,7 @@ def get_embedding(text):
 
         except requests.exceptions.HTTPError as e:
             if response.status_code == 429:
-                print(f"  ⏳ API 속도 제한(429). 5초 대기 후 재시도... ({attempt + 1}/3)")
+                print(f"API 속도 제한(429). 5초 대기 후 재시도... ({attempt + 1}/3)")
                 time.sleep(5)
             else:
                 raise e
