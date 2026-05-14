@@ -2,3 +2,4 @@
 *.safetensors
 scripts/data/
 .env
+*.iml

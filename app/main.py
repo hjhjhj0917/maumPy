@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api import analyze
+from app.api import analyze, chat
 import uvicorn
 
 from app.services.prediction import analyze_diary
@@ -8,6 +8,7 @@ from app.services.emotion import analyze_emotions
 app = FastAPI()
 
 app.include_router(analyze.router)
+app.include_router(chat.router)
 
 @app.on_event("startup")
 async def startup_event():
