@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.services.prediction import analyze_diary
 from app.services.emotion import analyze_emotions
@@ -41,27 +41,35 @@ async def analyze_text(request: DiaryRequest):
         combined_text = f"제목: {request.title}\n내용: {request.content}\n요약: {hcx_summary}"
         embedding_vector = generate_hcx_embedding(combined_text)
 
-        diary_log_document = {
-            "DIARY_NO": request.diary_no,
-            "USER_NO": request.user_no,
-            "TITLE": request.title,
-            "CONTENT": request.content,
-            "EMBEDDING": embedding_vector,
-            "MAIN_EMOTION": emo_data["main_emotion"],
-            "ANALYSIS_SUM": hcx_summary,
-            "EMO_RES": emo_data["raw_emotions"],
-            "DEP_RES": {
-                "DISEASE_TYPE": request.disease_type,
-                "DEP_LVL": dep_data["dep_res"]["final_level"],
-                "DEP_SCORE": float(dep_data["dep_res"]["raw_score"]),
-                "IS_SYMPTOM": dep_data["dep_res"]["is_symptom"]
+        update_query = {
+            "$set": {
+                "TITLE": request.title,
+                "CONTENT": request.content,
+                "EMBEDDING": embedding_vector,
+                "MAIN_EMOTION": emo_data["main_emotion"],
+                "ANALYSIS_SUM": hcx_summary,
+                "EMO_RES": emo_data["raw_emotions"],
+                "DEP_RES": {
+                    "DISEASE_TYPE": request.disease_type,
+                    "DEP_LVL": dep_data["dep_res"]["final_level"],
+                    "DEP_SCORE": float(dep_data["dep_res"]["raw_score"]),
+                    "IS_SYMPTOM": dep_data["dep_res"]["is_symptom"]
+                },
+                "CHG_DT": datetime.now(timezone.utc),
+                "VERSION": "HCX-Emb-v2"
             },
-            "REG_DT": datetime.utcnow(),
-            "CHG_DT": datetime.utcnow(),
-            "VERSION": "HCX-Emb-v2"
+            "$setOnInsert": {
+                "DIARY_NO": request.diary_no,
+                "USER_NO": request.user_no,
+                "REG_DT": datetime.now(timezone.utc)
+            }
         }
 
-        diary_logs_collection.insert_one(diary_log_document)
+        diary_logs_collection.update_one(
+            {"DIARY_NO": request.diary_no},
+            update_query,
+            upsert=True
+        )
 
         return DiaryResponse(
             analysis_summary=hcx_summary,
