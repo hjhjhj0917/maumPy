@@ -9,64 +9,55 @@ from app.core.database import db
 HCX_API_KEY = os.getenv("HCX_API_KEY")
 HCX_RAG_URL = os.getenv("HCX_RAG_URL")
 
-WELFARE_KEYWORDS = [
-    "지원금",
-    "복지",
-    "정책",
-    "청년지원",
-    "혜택",
-    "센터",
-    "고용",
-    "실업급여",
-    "국민취업지원",
-    "주거지원",
-    "생활비",
-    "대출",
-    "정부지원"
-]
-
-HOSPITAL_KEYWORDS = [
-    "병원",
-    "정신과",
-    "상담센터",
-    "우울",
-    "불안",
-    "자살",
-    "상담",
-    "치료",
-    "심리"
-]
-
-
 def get_user_context(user_id):
     try:
+        # user_id를 정수로 변환하여 조회 시도 (문자열로 들어왔을 가능성 대비)
+        try:
+            user_no_int = int(user_id)
+        except ValueError:
+            user_no_int = user_id
+
+        print(f"--- [DB 조회 시작] USER_NO: {user_no_int} (Type: {type(user_no_int)}) ---")
+        
+        # 숫자 타입으로 먼저 조회
         diaries = list(
             db["DIARY"]
-            .find({"USER_ID": user_id})
-            .sort("DATE", -1)
+            .find({"USER_NO": user_no_int})
+            .sort("REG_DT", -1)
             .limit(3)
         )
 
         if not diaries:
-            return ""
+            # 문자열 타입으로도 조회 시도 (안전장치)
+            diaries = list(
+                db["DIARY"]
+                .find({"USER_NO": str(user_id)})
+                .sort("REG_DT", -1)
+                .limit(3)
+            )
 
-        context = "사용자의 최근 기록:\n"
+        if not diaries:
+            return "최근 작성된 일기가 없습니다."
+
+        context = "사용자의 최근 기록(개인적인 기억):\n"
 
         for d in diaries:
-            date_value = d.get("DATE")
+            date_value = d.get("DATE") or d.get("date") or d.get("REG_DT")
 
             if isinstance(date_value, datetime):
-                date_str = date_value.strftime("%m월 %d일")
+                date_str = date_value.strftime("%Y년 %m월 %d일")
             else:
-                date_str = "최근"
+                date_str = str(date_value)
 
-            emotion = d.get("EMOTION", "")
-            content = d.get("CONTENT", "")
+            emotion = d.get("MAIN_EMOTION") or d.get("EMOTION") or d.get("emotion", "")
+            title = d.get("TITLE") or d.get("title", "")
+            content = d.get("CONTENT") or d.get("content", "")
 
             context += (
                 f"- 날짜: {date_str}\n"
-                f"감정: {emotion}\n"
-                f"내용: {content}\n"
+                f"  제목: {title}\n"
+                f"  감정: {emotion}\n"
+                f"  내용: {content}\n"
             )
 
         return context
@@ -74,46 +65,6 @@ def get_user_context(user_id):
     except Exception as e:
         print(f"Diary Context Error: {e}")
         return ""
-
-
-def classify_intent(user_input):
-    text = user_input.lower()
-
-    if any(keyword in text for keyword in HOSPITAL_KEYWORDS):
-        return "hospital_search"
-
-    if any(keyword in text for keyword in WELFARE_KEYWORDS):
-        return "welfare_search"
-
-    emotional_keywords = [
-        "힘들",
-        "우울",
-        "슬퍼",
-        "외로",
-        "죽고",
-        "불안",
-        "지쳤",
-        "괴로",
-        "무기력",
-        "스트레스"
-    ]
-
-    if any(keyword in text for keyword in emotional_keywords):
-        return "emotional_support"
-
-    diary_keywords = [
-        "일기",
-        "오늘 있었던 일",
-        "기억나",
-        "내 이야기",
-        "예전에"
-    ]
-
-    if any(keyword in text for keyword in diary_keywords):
-        return "diary_chat"
-
-    return "casual_chat"
-
 
 def execute_vector_search(query_text, collection_name):
     try:
@@ -142,18 +93,8 @@ def execute_vector_search(query_text, collection_name):
         context = ""
 
         for doc in results:
-            name = (
-                doc.get("NAME")
-                or doc.get("SVC_NM")
-                or "정보"
-            )
-
-            info = (
-                doc.get("SVC_DTL")
-                or doc.get("ADDR")
-                or ""
-            )
-
+            name = doc.get("NAME") or doc.get("SVC_NM") or "정보"
+            info = doc.get("SVC_DTL") or doc.get("ADDR") or ""
             context += f"[{name}]\n{info}\n\n"
 
         return context.strip()
@@ -162,104 +103,67 @@ def execute_vector_search(query_text, collection_name):
         print(f"Vector Search Error: {e}")
         return ""
 
+def build_system_prompt(diary_context):
+    return f"""
+당신은 사려 깊고 따뜻한 AI 친구 '마음'입니다.
 
-def build_system_prompt(intent, diary_context):
-    base_prompt = """
-당신은 사용자와 자연스럽게 대화하는 AI 친구 '마음'입니다.
+[사용자 문맥 (개인적 일기)]
+{diary_context}
 
-규칙:
-- 일반 대화에서는 과도한 위로를 하지 마세요.
-- 사용자가 실제로 힘들어할 때만 공감해주세요.
-- 정책/기관 질문일 때만 정보를 제공하세요.
-- 검색 결과가 없으면 억지로 위로하지 말고 자연스럽게 말하세요.
-- 답변은 짧고 자연스럽게 작성하세요.
-- 같은 표현을 반복하지 마세요.
-- "제가 곁에 있을게요" 같은 문장을 반복 사용하지 마세요.
-- 상황에 맞는 현실적인 답변을 우선하세요.
+[행동 지침]
+1. [사용자 문맥]에 있는 내용은 사용자가 실제로 겪은 '개인적인 과거 기억'입니다. 질문에 답변할 때 이 내용을 우선적으로 활용하세요.
+2. 만약 [사용자 문맥]에 관련 내용이 없다면, 절대로 과거 기억을 지어내지 마세요. 대신 "아직 그 부분에 대해서는 들은 적이 없지만, 어떤 일이 있었는지 말해줄 수 있어?"라고 정중하게 물어보세요.
+3. 도구(search_hospital, search_welfare)를 통해 얻은 검색 결과는 '외부 지원 기관 정보'일 뿐입니다. 이를 사용자의 개인적인 친구나 기억으로 착각하여 답변하지 마세요. (예: '좋은날'이라는 기관 정보를 보고 "예전에 '좋은날'에 가서 즐거웠잖아"라고 말하면 안 됨)
+4. 사용자가 우울하거나 즐거운 일이 없다고 하면 따뜻하게 공감하고, 필요한 경우에만 검색된 외부 정보를 '추천'하듯 전달하세요.
+5. 마크다운을 사용하여 가독성 좋게 답변하세요.
 """
 
-    intent_prompt = {
-        "casual_chat": """
-현재 상황은 일반 대화입니다.
-친구처럼 자연스럽게 대화하세요.
-""",
-
-        "emotional_support": """
-현재 상황은 감정 공감 대화입니다.
-과하지 않은 공감과 현실적인 대화를 함께 제공하세요.
-""",
-
-        "welfare_search": """
-현재 상황은 정책/복지 정보 요청입니다.
-검색 결과를 기반으로 핵심 정보 위주로 설명하세요.
-""",
-
-        "hospital_search": """
-현재 상황은 병원/상담기관 요청입니다.
-기관 정보와 도움받을 방법을 안내하세요.
-""",
-
-        "diary_chat": """
-현재 상황은 사용자의 일기 기반 대화입니다.
-최근 기록을 참고해서 자연스럽게 대화하세요.
-"""
-    }
-
-    return (
-        base_prompt
-        + "\n"
-        + intent_prompt.get(intent, "")
-        + "\n"
-        + diary_context
-    )
-
-
-def create_tools(intent):
-    tools = []
-
-    if intent == "hospital_search":
-        tools.append({
+def create_tools():
+    return [
+        {
             "type": "function",
             "function": {
                 "name": "search_hospital",
-                "description": "병원 및 상담기관 검색",
+                "description": "우울증, 심리 상담, 병원, 정신건강 관련 지원 기관 검색",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {
-                            "type": "string"
-                        }
+                        "query": {"type": "string"}
                     },
                     "required": ["query"]
                 }
             }
-        })
-
-    if intent == "welfare_search":
-        tools.append({
+        },
+        {
             "type": "function",
             "function": {
                 "name": "search_welfare",
-                "description": "복지 및 정책 검색",
+                "description": "취업, 주거, 생활비, 지원금, 복지 정책 등 현실적인 지원 검색",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {
-                            "type": "string"
-                        }
+                        "query": {"type": "string"}
                     },
                     "required": ["query"]
                 }
             }
-        })
-
-    return tools
+        }
+    ]
 
 
 def stream_response(payload, headers):
     previous_text = ""
-
+    # 헤더가 None이면 빈 딕셔너리로 초기화
+    if headers is None:
+        headers = {}
+    
+    # Accept 헤더를 강제로 설정
     headers["Accept"] = "text/event-stream"
+    payload["stream"] = True
+
+    print(f"--- HCX 스트리밍 호출 시작 ---")
+    print(f"URL: {HCX_RAG_URL}")
+    print(f"Headers: {json.dumps({k: v if k != 'Authorization' else 'Bearer ***' for k, v in headers.items()}, ensure_ascii=False)}")
 
     with requests.post(
         HCX_RAG_URL,
@@ -269,28 +173,39 @@ def stream_response(payload, headers):
         timeout=30
     ) as response:
 
-        for line in response.iter_lines():
+        print(f"HCX 응답 상태: {response.status_code}")
+        
+        if response.status_code != 200:
+            print(f"HCX 에러 상세: {response.text}")
+            yield "정보를 가져오는 중 오류가 발생했습니다."
+            return
 
+        for line in response.iter_lines():
             if not line:
                 continue
 
             decoded = line.decode("utf-8")
 
             if not decoded.startswith("data:"):
+                if decoded.strip():
+                    print(f"비정상 라인: {decoded}")
                 continue
 
             data_str = decoded[5:].strip()
 
             if data_str == "[DONE]":
+                print("--- HCX 스트림 완료 [DONE] ---")
                 break
 
             try:
                 parsed = json.loads(data_str)
 
-                current_text = (
-                    parsed.get("message", {})
-                    .get("content", "")
+                message_obj = (
+                    parsed.get("message")
+                    or parsed.get("result", {}).get("message", {})
                 )
+
+                current_text = message_obj.get("content", "")
 
                 delta = current_text[len(previous_text):]
 
@@ -298,36 +213,22 @@ def stream_response(payload, headers):
                     previous_text = current_text
                     yield delta
 
-            except Exception:
+            except Exception as e:
+                print(f"파싱 에러: {e}")
                 continue
-
 
 def generate_rag_response_stream(user_id, user_input):
     try:
-        intent = classify_intent(user_input)
-
-        print(f"USER INPUT: {user_input}")
-        print(f"CLASSIFIED INTENT: {intent}")
-
         diary_context = get_user_context(user_id)
-
-        system_prompt = build_system_prompt(
-            intent,
-            diary_context
-        )
+        print(f"--- [DIARY CONTEXT] ---\n{diary_context}\n-----------------------")
+        system_prompt = build_system_prompt(diary_context)
 
         messages = [
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-            {
-                "role": "user",
-                "content": user_input
-            }
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input}
         ]
 
-        tools = create_tools(intent)
+        tools = create_tools()
 
         headers = {
             "Content-Type": "application/json",
@@ -336,14 +237,12 @@ def generate_rag_response_stream(user_id, user_input):
 
         payload = {
             "messages": messages,
+            "tools": tools,
+            "toolChoice": "auto",
             "topP": 0.8,
             "temperature": 0.7,
             "maxTokens": 1024
         }
-
-        if tools:
-            payload["tools"] = tools
-            payload["toolChoice"] = "auto"
 
         response = requests.post(
             HCX_RAG_URL,
@@ -353,82 +252,82 @@ def generate_rag_response_stream(user_id, user_input):
         )
 
         response.raise_for_status()
-
         result_json = response.json()
-
+        print(f"--- HCX 1차 응답 데이터: {json.dumps(result_json, ensure_ascii=False)} ---")
+        
         result_message = (
-            result_json.get("result", {})
-            .get("message", {})
+            result_json.get("result", {}).get("message", {}) 
+            or result_json.get("message", {})
         )
-
-        tool_calls = result_message.get("toolCalls", [])
+        
+        tool_calls = result_message.get("tool_calls") or result_message.get("toolCalls") or []
 
         if tool_calls:
+            yield "<think>마음이 필요한 정보를 찾고 있어요...</think>"
             messages.append(result_message)
 
             for tool in tool_calls:
-
                 tool_name = tool["function"]["name"]
                 tool_query = tool["function"]["arguments"]["query"]
-                tool_id = tool["id"]
-
-                print(f"TOOL: {tool_name}")
-                print(f"QUERY: {tool_query}")
+                tool_id = tool.get("id") or tool.get("toolCallId")
 
                 collection_name = (
-                    "MENTAL_INST"
-                    if tool_name == "search_hospital"
-                    else "PUBLIC_SVC"
+                    "MENTAL_INST" if tool_name == "search_hospital" else "PUBLIC_SVC"
                 )
 
-                search_result = execute_vector_search(
-                    tool_query,
-                    collection_name
-                )
-
-                print(f"SEARCH RESULT: {search_result}")
-
-                tool_content = (
-                    search_result
-                    if search_result
-                    else "검색 결과 없음"
-                )
+                search_result = execute_vector_search(tool_query, collection_name)
+                print(f"--- [SEARCH RESULT ({collection_name})] ---\n{search_result}\n-----------------------")
+                
+                tool_content = search_result if search_result else "관련 정보를 찾지 못했습니다. 따뜻하게 위로해 주세요."
 
                 messages.append({
                     "role": "tool",
                     "content": tool_content,
-                    "toolCallId": tool_id
+                    "tool_call_id": tool_id
                 })
 
             second_payload = {
                 "messages": messages,
                 "topP": 0.8,
                 "temperature": 0.7,
-                "maxTokens": 1024
+                "maxTokens": 1024,
+                "stream": False # 406 에러 해결을 위해 False로 시도
             }
 
-            for chunk in stream_response(
-                second_payload,
-                headers
-            ):
-                yield chunk
+            # 2차 호출은 스트리밍이 아닌 일반 호출로 수행
+            stream_headers = headers.copy()
+            stream_headers["Accept"] = "application/json"
 
-        else:
-            final_text = (
-                result_message.get("content", "")
-                or "무슨 이야기든 편하게 해주세요."
+            print(f"--- HCX 2차 호출(비스트리밍) 시작 ---")
+            second_res = requests.post(
+                HCX_RAG_URL,
+                headers=stream_headers,
+                json=second_payload,
+                timeout=30
             )
-
-            yield final_text
+            
+            if second_res.status_code == 200:
+                res_data = second_res.json()
+                final_content = (
+                    res_data.get("result", {}).get("message", {}).get("content", "")
+                    or res_data.get("message", {}).get("content", "")
+                    or "도움이 될 만한 정보를 찾았습니다."
+                )
+                for char in final_content:
+                    yield char
+                    time.sleep(0.005)
+            else:
+                print(f"HCX 2차 호출 실패: {second_res.status_code}, {second_res.text}")
+                yield "정보를 정리하는 중에 문제가 발생했습니다."
+        else:
+            final_text = result_message.get("content", "") or "오늘 하루도 정말 고생 많았어요."
+            for char in final_text:
+                yield char
+                time.sleep(0.01)
 
     except Exception as e:
         print(f"RAG API ERROR: {e}")
-
-        fallback_message = (
-            "지금 응답 연결이 잠시 불안정해요. "
-            "조금 뒤에 다시 이야기해볼까요?"
-        )
-
+        fallback_message = "지금 응답 연결이 잠시 불안정해요. 조금 뒤에 다시 이야기해볼까요?"
         for char in fallback_message:
             yield char
             time.sleep(0.01)

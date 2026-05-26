@@ -15,8 +15,11 @@ class ChatRequest(BaseModel):
 async def process_rag_chat(request: ChatRequest):
     print(f"[{request.userNo}의 메시지]: {request.message}")
 
-    # StreamingResponse를 사용해 데이터가 생성되는 즉시 Spring(또는 프론트)으로 쏴줍니다.
+    async def event_generator():
+        for chunk in generate_rag_response_stream(request.userNo, request.message):
+            yield f"{chunk}\n"
+
     return StreamingResponse(
-        generate_rag_response_stream(request.userNo, request.message),
+        event_generator(),
         media_type="text/plain"
     )
