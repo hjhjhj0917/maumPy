@@ -18,20 +18,25 @@ def get_analysis_summary(final_level):
 def analyze_diary(content: str, disease_type: str = "depression"):
 
     if disease_type not in models:
+
+        # 모델 로드
         model_path = f"./models/trained_model_kluebert_{disease_type}"
         models[disease_type] = BertForSequenceClassification.from_pretrained(model_path).to(DEVICE)
         models[disease_type].eval()
 
         tokenizers[disease_type] = BertTokenizer.from_pretrained(model_path)
 
+    # 사용자 텍스트 토큰화
     inputs = tokenizers[disease_type](content, return_tensors="pt", padding=True, truncation=True, max_length=512).to(DEVICE)
 
+    # 결과 값 날것 점수 반환
     with torch.no_grad():
         outputs = models[disease_type](**inputs)
 
     probs = torch.softmax(outputs.logits, dim=-1).cpu().numpy().flatten()
     raw_score = float(sum(i * prob for i, prob in enumerate(probs)))
 
+    # 여기!! 성능 개선이 필요한 부분
     if raw_score < 0.6: dep_lvl = 0
     elif raw_score < 1.65: dep_lvl = 1
     elif raw_score < 2.45: dep_lvl = 2

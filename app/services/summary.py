@@ -9,6 +9,8 @@ HCX_API_KEY = os.getenv("HCX_API_KEY")
 
 
 def generate_hcx_summary(content: str, dep_level: int, raw_emotions: dict) -> str:
+
+    # 데이터 전처리
     top_emotions = sorted(raw_emotions.items(), key=lambda x: x[1], reverse=True)[:3]
     emotions_str = ", ".join([f"{emo}({round(prob * 100, 1)}%)" for emo, prob in top_emotions])
 
