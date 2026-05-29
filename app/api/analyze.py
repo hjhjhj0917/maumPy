@@ -17,7 +17,7 @@ class DiaryRequest(BaseModel):
     title: str
     content: str
     disease_type: str = "depression"
-
+    created_at: datetime
 
 class DiaryResponse(BaseModel):
     analysis_summary: str
@@ -61,7 +61,7 @@ async def analyze_text(request: DiaryRequest):
             "$setOnInsert": {
                 "DIARY_NO": request.diary_no,
                 "USER_NO": request.user_no,
-                "REG_DT": datetime.now(timezone.utc)
+                "REG_DT": request.created_at
             }
         }
 
