@@ -6,6 +6,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 models = {}
 tokenizers = {}
 
+# 여기 수정
 def get_analysis_summary(final_level):
     summary_map = {
         0: "정상 범위 내의 정서 상태",
