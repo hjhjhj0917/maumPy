@@ -1,263 +1,238 @@
-# -*- coding: utf-8 -*-
-"""(제출) kluebert_train.ipynb"""
-
-disease = "depression"  # addiction, depression, anxiety 중 택 1
-
 import os
 import json
+import random
 import platform
 from datetime import datetime
-
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.model_selection import train_test_split
 from datasets import Dataset
-from sklearn.metrics import f1_score
-from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments, \
-    DataCollatorWithPadding
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
+from sklearn.utils import resample
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, \
+    DataCollatorWithPadding, EarlyStoppingCallback
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+disease = "depression"
+SEED = 42
 
-print("실행 시각:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
 
-print("\n1. CPU 사양")
-print(platform.processor())
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-print("\n2. GPU 사양")
-if torch.cuda.is_available():
-    print(torch.cuda.get_device_name(0))
-else:
-    print("GPU 없음")
 
-print("\n3. RAM 사양")
-try:
-    import psutil
+def preprocess_text(paragraphs):
+    sentences = []
+    for token in paragraphs:
+        speaker = token.get("paragraph_speaker", "")
+        text = token.get("paragraph_text", "").strip()
 
-    mem = psutil.virtual_memory()
-    print(f"Total: {mem.total / (1024 ** 3):.2f} GB, Available: {mem.available / (1024 ** 3):.2f} GB")
-except ImportError:
-    print("psutil 미설치")
+        if not text or "상담사" in speaker:
+            continue
 
-print("\n4. OS 및 프레임워크 버전")
-print(platform.platform())
-print("PyTorch:", torch.__version__)
+        sentences.append(text)
+
+    return " ".join(sentences)
+
+
+folder_path = "./data/training"
+json_files = [f for f in os.listdir(folder_path) if f.endswith(".json")]
+
+texts = []
+labels = []
+filenames = []
+
+for json_file in json_files:
+    file_path = os.path.join(folder_path, json_file)
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            js = json.load(f)
+            label_val = js.get(disease, 0)
+            if label_val is None:
+                label_val = 0
+
+            label = min(max(int(label_val), 0), 3)
+            binary_label = 0 if label == 0 else 1
+
+            paragraphs = js.get("paragraph", [])
+            sentence = preprocess_text(paragraphs)
+
+            if len(sentence.strip()) < 5:
+                continue
+
+            texts.append(sentence)
+            labels.append(binary_label)
+            filenames.append(json_file)
+
+    except Exception:
+        continue
+
+df = pd.DataFrame({
+    "filename": filenames,
+    "input": texts,
+    "label": labels
+})
+
+train_df, test_df = train_test_split(
+    df,
+    test_size=0.2,
+    random_state=SEED,
+    stratify=df["label"]
+)
+
+max_count = train_df["label"].value_counts().max()
+balanced_dfs = []
+
+for label in sorted(train_df["label"].unique()):
+    class_df = train_df[train_df["label"] == label]
+    sampled_df = resample(class_df, replace=True, n_samples=max_count, random_state=SEED)
+    balanced_dfs.append(sampled_df)
+
+train_df_balanced = pd.concat(balanced_dfs).sample(frac=1, random_state=SEED).reset_index(drop=True)
+
+class_weights_tensor = torch.tensor([1.0, 1.2], dtype=torch.float).to(device)
+
+train_dataset = Dataset.from_pandas(train_df_balanced)
+test_dataset = Dataset.from_pandas(test_df.reset_index(drop=True))
+
+model_name = "klue/roberta-base"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
 
 
 def tokenize_function(examples):
-    return tokenizer(examples['input'], truncation=True, max_length=512)
+    return tokenizer(
+        examples["input"],
+        truncation=True,
+        padding=False,
+        max_length=512
+    )
 
 
-def get_analysis_summary(final_level):
-    summary_map = {
-        0: "정상 범위 내의 정서 상태",
-        1: "경미한 우울 증상 의심",
-        2: "중간 수준의 우울 증상 의심",
-        3: "심화된 우울 증상 의심"
+train_dataset = train_dataset.map(tokenize_function, batched=True)
+test_dataset = test_dataset.map(tokenize_function, batched=True)
+
+remove_columns = [col for col in ["input", "filename", "__index_level_0__"] if col in train_dataset.column_names]
+train_dataset = train_dataset.remove_columns(remove_columns)
+test_dataset = test_dataset.remove_columns(remove_columns)
+
+train_dataset = train_dataset.rename_column("label", "labels")
+test_dataset = test_dataset.rename_column("label", "labels")
+
+train_dataset.set_format("torch")
+test_dataset.set_format("torch")
+
+
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    probs = torch.nn.functional.softmax(torch.tensor(logits), dim=-1).numpy()
+
+    threshold = 0.4
+    preds = (probs[:, 1] >= threshold).astype(int)
+
+    accuracy = accuracy_score(labels, preds)
+    macro_f1 = f1_score(labels, preds, average="macro")
+    binary_f1 = f1_score(labels, preds, average="binary")
+
+    return {
+        "accuracy": accuracy,
+        "macro_f1": macro_f1,
+        "binary_f1": binary_f1
     }
-    return summary_map.get(final_level, "분석 결과 없음")
 
 
-class WeightedLossTrainer(Trainer):
+class WeightedTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.get("labels")
         outputs = model(**inputs)
         logits = outputs.get("logits")
 
-        # 약한 페널티만 부여
-        weights = torch.tensor([1.0, 1.1, 1.2, 1.3]).to(device)
-        loss_fct = nn.CrossEntropyLoss(weight=weights)
+        loss_fct = nn.CrossEntropyLoss(weight=class_weights_tensor)
         loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
+
         return (loss, outputs) if return_outputs else loss
 
-
-def predict(sentence, model, tokenizer):
-    inputs = tokenizer(sentence, return_tensors="pt", truncation=True, max_length=512)
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-    model.to(device)
-
-    with torch.no_grad():
-        outputs = model(**inputs)
-
-    probs = torch.softmax(outputs.logits, dim=-1).squeeze()
-
-    # 가장 확률이 높은(argmax) 정답을 선택
-    final_level = int(torch.argmax(probs))
-    raw_score = float(sum(i * prob for i, prob in enumerate(probs)))  # 프론트엔드/JSON 응답용 점수 유지
-
-    return {
-        "disease_type": disease,
-        "final_level": final_level,
-        "raw_score": round(raw_score, 4),
-        "is_symptom": final_level != 0,
-        "analysis_summary": get_analysis_summary(final_level)
-    }
-
-
-folder_path = './data/training'
-json_files = [f for f in os.listdir(folder_path) if f.endswith('.json')]
-
-labels = []
-txts = []
-valid_json_files = []
-
-print("\n학습 데이터 전처리 중...")
-for json_file in json_files:
-    file_path = os.path.join(folder_path, json_file)
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            js = json.load(f)
-
-            label_val = js.get(disease, 0)
-            if label_val is None: label_val = 0
-
-            safe_label = min(max(int(label_val), 0), 3)
-            labels.append(safe_label)
-            paragraghs = js.get("paragraph", [])
-
-            sentences = ""
-            for token in paragraghs:
-                speaker = token.get("paragraph_speaker", "")
-                text = token.get("paragraph_text", "")
-                token_sentence = f"{speaker}: {text}\n"
-                sentences += token_sentence
-
-            txts.append(sentences)
-            valid_json_files.append(json_file)
-    except Exception:
-        continue
-
-assert len(labels) == len(txts)
-
-df = pd.DataFrame({
-    'filename': valid_json_files,
-    'input': txts,
-    'label': labels
-})
-df.to_excel(disease + '_data.xlsx', index=False)
-
-df_normal = df[df['label'] == 0]
-df_dep = df[df['label'] > 0]
-
-sample_size = min(len(df_normal), int(len(df_dep) * 1.5))
-df_balanced = pd.concat([df_normal.sample(n=sample_size, random_state=42), df_dep]).sample(frac=1,
-                                                                                           random_state=42).reset_index(
-    drop=True)
-print(f"데이터 밸런싱 완료! 정상: {sample_size}개 | 우울: {len(df_dep)}개")
-
-train_df, test_df = train_test_split(df_balanced, test_size=0.2, random_state=42)
-
-train_dataset = Dataset.from_pandas(train_df.reset_index(drop=True))
-test_dataset = Dataset.from_pandas(test_df.reset_index(drop=True))
-
-model_name = "klue/bert-base"
-tokenizer = BertTokenizer.from_pretrained(model_name)
-model = BertForSequenceClassification.from_pretrained(model_name, num_labels=4)
-
-train_dataset = train_dataset.map(tokenize_function, batched=True)
-test_dataset = test_dataset.map(tokenize_function, batched=True)
-
-remove_train_columns = [col for col in ['input', 'filename', '__index_level_0__'] if col in train_dataset.column_names]
-remove_test_columns = [col for col in ['input', 'filename', '__index_level_0__'] if col in test_dataset.column_names]
-train_dataset = train_dataset.remove_columns(remove_train_columns)
-test_dataset = test_dataset.remove_columns(remove_test_columns)
-
-train_dataset = train_dataset.rename_column("label", "labels")
-test_dataset = test_dataset.rename_column("label", "labels")
-train_dataset.set_format('torch')
-test_dataset.set_format('torch')
 
 training_args = TrainingArguments(
     output_dir="./results",
     eval_strategy="epoch",
-    learning_rate=2e-5,
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=16,
-    num_train_epochs=5,
-    logging_steps=10,
-    weight_decay=0.01,
-    logging_dir='./logs_anxiety',
     save_strategy="epoch",
-    fp16=True,
+    learning_rate=2e-5,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    num_train_epochs=10,
+    weight_decay=0.01,
+    logging_steps=20,
+    fp16=torch.cuda.is_available(),
     load_best_model_at_end=True,
-    metric_for_best_model="eval_loss",
-    greater_is_better=False,
+    metric_for_best_model="binary_f1",
+    greater_is_better=True,
     save_total_limit=2,
     report_to=[]
 )
 
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-trainer = WeightedLossTrainer(
+
+trainer = WeightedTrainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=test_dataset,
-    data_collator=data_collator
+    data_collator=data_collator,
+    compute_metrics=compute_metrics,
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
 )
 
-print("\n모델 학습 시작...")
 trainer.train()
 
-trainer.save_model("./trained_model_kluebert_" + disease)
-tokenizer.save_pretrained("./trained_model_kluebert_" + disease)
+save_path = f"./trained_model_{disease}_binary"
+trainer.save_model(save_path)
+tokenizer.save_pretrained(save_path)
 
-print("\n모델 성능 평가 중...")
-trainer.evaluate()
+predictions = trainer.predict(test_dataset)
+probs = torch.nn.functional.softmax(torch.tensor(predictions.predictions), dim=-1).numpy()
+threshold = 0.4
+preds = (probs[:, 1] >= threshold).astype(int)
+labels = predictions.label_ids
 
-# --- 테스트셋 검증 로직 ---
-loaded_model = BertForSequenceClassification.from_pretrained("./trained_model_kluebert_" + disease).to(device)
-loaded_tokenizer = BertTokenizer.from_pretrained("./trained_model_kluebert_" + disease)
-loaded_model.eval()
+accuracy = accuracy_score(labels, preds)
+macro_f1 = f1_score(labels, preds, average="macro")
+binary_f1 = f1_score(labels, preds, average="binary")
 
-folder_path = './data/test'
-test_json_files = [f for f in os.listdir(folder_path) if f.endswith('.json')]
+print(f"Accuracy: {accuracy * 100:.2f}%")
+print(f"Macro F1: {macro_f1 * 100:.2f}%")
+print(f"Binary F1: {binary_f1 * 100:.2f}%")
+print(classification_report(labels, preds, digits=4))
+print(confusion_matrix(labels, preds))
 
-test_labels = []
-test_txts = []
-valid_test_json_files = []
+# --- 기존 코드 맨 아래에 이어서 추가 ---
 
-for json_file in test_json_files:
-    file_path = os.path.join(folder_path, json_file)
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            js = json.load(f)
-            label_val = js.get(disease, 0)
-            if label_val is None: label_val = 0
-            test_labels.append(int(label_val))
+print("\n===== 🎯 최적의 Threshold(임계값) 찾기 =====")
 
-            paragraghs = js.get("paragraph", [])
-            sentences = "".join(
-                [f"{t.get('paragraph_speaker', '')}: {t.get('paragraph_text', '')}\n" for t in paragraghs])
+# trainer.predict()로 뽑아둔 확률 값(probs) 재사용
+best_threshold = 0.5
+best_f1 = 0.0
 
-            test_txts.append(sentences)
-            valid_test_json_files.append(json_file)
-    except Exception:
-        continue
+# 0.40 부터 0.60 까지 0.05 단위로 테스트
+for t in np.arange(0.40, 0.65, 0.05):
+    temp_preds = (probs[:, 1] >= t).astype(int)
 
-assert len(test_labels) == len(test_txts)
+    temp_acc = accuracy_score(labels, temp_preds)
+    temp_binary_f1 = f1_score(labels, temp_preds, average="binary")
+    temp_recall = f1_score(labels, temp_preds, average="binary")  # recall 확인용
 
-test_df = pd.DataFrame({
-    'input': test_txts,
-    'original_label_zeroone': [0 if x == 0 else 1 for x in test_labels]
-})
+    print(f"[Threshold {t:.2f}] Accuracy: {temp_acc * 100:.2f}% | Binary F1: {temp_binary_f1 * 100:.2f}%")
 
-predicted_labels_zeroone = []
-for sentence in test_df['input']:
-    dep_res = predict(sentence, loaded_model, loaded_tokenizer)
-    predicted_labels_zeroone.append(0 if dep_res['final_level'] == 0 else 1)
+    # 혼동 행렬 간략 출력
+    cm = confusion_matrix(labels, temp_preds)
+    print(f"  -> 정상오해(FP): {cm[0][1]}명 | 환자놓침(FN): {cm[1][0]}명 | 환자찾음(TP): {cm[1][1]}명\n")
 
-original_array = np.array(test_df['original_label_zeroone'])
-predicted_array = np.array(predicted_labels_zeroone)
+    if temp_binary_f1 > best_f1:
+        best_f1 = temp_binary_f1
+        best_threshold = t
 
-accuracy_zeroone = np.mean(original_array == predicted_array)
-f1_zeroone = f1_score(original_array, predicted_array, average='macro')
-
-# Accuracy (정확도): 73.56%
-# F1 Score (Macro): 53.68%
-
-print("\n==================================")
-print(f"최종 검증 지표 ({disease} 0(정상) vs 1(우울증 증상))")
-print(f"Accuracy (정확도): {accuracy_zeroone * 100:.2f}%")
-print(f"F1 Score (Macro): {f1_zeroone * 100:.2f}%")
-print("==================================\n")
+print(f"💡 결론: 이 모델의 최고 성능은 Threshold가 {best_threshold:.2f} 일 때, Binary F1 {best_f1 * 100:.2f}% 입니다!")
