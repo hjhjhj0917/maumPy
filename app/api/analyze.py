@@ -56,7 +56,7 @@ async def analyze_text(request: DiaryRequest):
                     "IS_SYMPTOM": dep_data["dep_res"]["is_symptom"]
                 },
                 "CHG_DT": datetime.now(timezone.utc),
-                "VERSION": "HCX-Emb-v2"
+                "VERSION": "MAUM-Ensemble-v1.0"
             },
             "$setOnInsert": {
                 "DIARY_NO": request.diary_no,
