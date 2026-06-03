@@ -1,12 +1,12 @@
 import torch
 import numpy as np
+import re
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 MODEL_NAME = "searle-j/kote_for_easygoing_people"
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# 감정 그룹별 색상
 EMOTION_GROUPS = {
     "기쁨": {"color": "#FFD700", "labels": ['즐거움/신남', '행복', '기쁨', '뿌듯함', '흐뭇함(귀여움/예쁨)', '감동/감탄', '고마움', '환영/호의']},
     "신뢰": {"color": "#66CDAA", "labels": ['안심/신뢰', '존경', '아껴주는', '편안/쾌적']},
@@ -19,7 +19,6 @@ EMOTION_GROUPS = {
     "무감정": {"color": "#9E9E9E", "labels": ['없음', '귀찮음', '재미없음', '우쭐댐/무시함', '의심/불신']}
 }
 
-# KOTE AI가 분석하는 44가지 감정
 KOTE_LABELS = ['불평/불만', '환영/호의', '감동/감탄', '지긋지긋', '고마움', '슬픔', '화남/분노', '존경', '기대감', '우쭐댐/무시함', '안타까움/실망', '비장함',
                '의심/불신', '뿌듯함', '편안/쾌적', '신기함/관심', '아껴주는', '부끄러움', '공포/무서움', '절망', '한심함', '역겨움/징그러움', '짜증', '어이없음', '없음',
                '패배/자기혐오', '귀찮음', '힘듦/지침', '즐거움/신남', '깨달음', '죄책감', '증오/혐오', '흐뭇함(귀여움/예쁨)', '당황/난처', '경악', '부담/안_내킴',
@@ -27,20 +26,38 @@ KOTE_LABELS = ['불평/불만', '환영/호의', '감동/감탄', '지긋지긋'
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
-# 모델 호출
 model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME).to(DEVICE)
 model.eval()
 
 
-def analyze_emotions(text):
+def split_into_chunks(text, window=3, step=2):
+    sentences = re.split(r'(?<=[.!?\n])\s+', text.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
+    if not sentences:
+        sentences = [text]
 
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True).to(DEVICE)
+    chunks = []
+    for i in range(0, len(sentences), step):
+        chunk = " ".join(sentences[i:i + window])
+        chunks.append(chunk)
+        if i + window >= len(sentences):
+            break
+    return chunks
+
+
+def analyze_emotions(text):
+    chunks = split_into_chunks(text, window=3, step=2)
+    all_probs = []
 
     with torch.no_grad():
-        outputs = model(**inputs)
-        probs = torch.sigmoid(outputs.logits).cpu().numpy().flatten()
+        for chunk in chunks:
+            inputs = tokenizer(chunk, return_tensors="pt", truncation=True, padding=True, max_length=512).to(DEVICE)
+            outputs = model(**inputs)
+            probs = torch.sigmoid(outputs.logits).cpu().numpy().flatten()
+            all_probs.append(probs)
 
-    raw_results = {KOTE_LABELS[i]: float(probs[i]) for i in range(len(KOTE_LABELS))}
+    avg_probs = np.mean(all_probs, axis=0)
+    raw_results = {KOTE_LABELS[i]: float(avg_probs[i]) for i in range(len(KOTE_LABELS))}
 
     main_emotion = max(raw_results, key=raw_results.get)
     max_prob = raw_results[main_emotion]
