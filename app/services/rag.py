@@ -72,7 +72,7 @@ def get_user_context(user_id, user_input=None):
             if query_vector:
                 # [Resilient Pipeline] 필터 인덱스 미설정 시에도 작동하도록 2단계로 시도
                 try:
-                    # 1차 시도: 필터가 포함된 최적화된 검색
+                    # 1차 시도: 필터가 포함된 최적화된 검색 + 유사도 점수 추출
                     pipeline = [
                         {
                             "$vectorSearch": {
@@ -83,13 +83,24 @@ def get_user_context(user_id, user_input=None):
                                 "limit": 5,
                                 "filter": {"USER_NO": user_no}
                             }
+                        },
+                        {
+                            "$project": {
+                                "CONTENT": 1,
+                                "DATE": 1,
+                                "REG_DT": 1,
+                                "score": {"$meta": "vectorSearchScore"}
+                            }
                         }
                     ]
-                    relevant_diaries = list(db["DIARY_LOGS"].aggregate(pipeline))
+                    raw_diaries = list(db["DIARY_LOGS"].aggregate(pipeline))
+                    # 유사도가 0.6 이상인 의미 있는 데이터만 필터링 (쓰레기 데이터 차단)
+                    relevant_diaries = [doc for doc in raw_diaries if doc.get('score', 0) >= 0.60]
+
                 except Exception as ve:
                     print(f"[VECTOR ERROR] {ve}")
                     print("[HINT] 필터 인덱스 설정 전이므로 대체 검색을 수행합니다.")
-                    # 2차 시도: 전체 검색 후 파이썬/매치 단계에서 필터링
+                    # 2차 시도: 전체 검색 후 파이썬/매치 단계에서 필터링 + 유사도 점수 추출
                     pipeline_fallback = [
                         {
                             "$vectorSearch": {
@@ -101,17 +112,25 @@ def get_user_context(user_id, user_input=None):
                             }
                         },
                         {"$match": {"USER_NO": user_no}},
-                        {"$limit": 5}
+                        {"$limit": 5},
+                        {
+                            "$project": {
+                                "CONTENT": 1,
+                                "DATE": 1,
+                                "REG_DT": 1,
+                                "score": {"$meta": "vectorSearchScore"}
+                            }
+                        }
                     ]
                     try:
-                        relevant_diaries = list(db["DIARY_LOGS"].aggregate(pipeline_fallback))
+                        raw_fallback = list(db["DIARY_LOGS"].aggregate(pipeline_fallback))
+                        relevant_diaries = [doc for doc in raw_fallback if doc.get('score', 0) >= 0.60]
                     except:
                         relevant_diaries = []
 
         # 3. 중복 제거
         seen = set()
         combined = []
-        # ... (rest of the logic)
 
         for doc in recent_diaries + relevant_diaries:
             doc_id = str(doc.get("_id"))
@@ -183,19 +202,30 @@ def execute_vector_search(query_text, collection_name):
 # 마스터 시스템 프롬프트 (안전필터 우회 및 팩트 강화)
 # =========================================================
 
-def build_system_prompt(diary_context):
-    return f"""
-당신은 다정한 친구 '마음'입니다. 사용자와 편하게 대화하며 공감해주세요.
-
-[사용자의 기록]
-{diary_context}
+def build_system_prompt(diary_context, is_daily_talk=False):
+    # [수정] 일상 대화일 때와 검색이 필요할 때의 프롬프트를 완전히 분리
+    if is_daily_talk:
+        return """
+당신은 사용자와 편안하게 일상을 나누는 다정하고 따뜻한 챗봇 '마음'입니다.
 
 [대화 원칙]
-- 사용자와 일상적인 대화(메뉴 추천, 오늘 날씨 등)를 즐겁게 나눠주세요.
-- 만약 사용자가 과거의 기억을 물어보면, 위 [사용자의 기록]을 참고해서 다정하게 이야기해주세요.
-- 말투는 "~해요", "~군요" 처럼 친근하게 사용해주세요.
-- **절대로 <꺽쇠 괄호>를 사용하지 마세요.**
-- 전문적인 심리 상담이나 진단은 하지 마세요. 그냥 옆에 있어주는 친구 역할에 집중하세요.
+1. 사용자의 일상적인 질문(메뉴 추천, 날씨, 안부 등)에 상식과 공감 능력을 발휘하여 자연스럽고 친절하게 추천 및 대답해 주세요.
+2. 말투는 "~해요", "~군요", "~어떨까요?" 처럼 친근하고 부드럽게 사용하세요.
+3. 기계적인 답변을 피하고 친한 친구처럼 대화하세요.
+"""
+    else:
+        return f"""
+당신은 사용자의 고민을 공감하고 따뜻하게 대화하는 챗봇 '마음'입니다.
+
+[참고 정보: 사용자의 과거 기록 및 검색된 정책/기관]
+{diary_context if diary_context else "참고할 기록이 없습니다."}
+
+[대화 원칙]
+1. 사용자가 질문을 하면 반드시 위 [참고 정보]를 바탕으로 대답하세요.
+2. 정보가 없다면 억지로 지어내지 말고, "해당 내용에 대해서는 찾을 수 없네요"라고 솔직하게 말하며 공감해 주세요.
+3. 과거 일기 내용을 말할 때는 "기록을 보니 ~하셨군요"처럼 자연스럽게 언급해 주세요.
+4. 말투는 "~해요", "~군요" 처럼 친근하게 사용하고, 전문적인 심리 상담이나 섣부른 진단은 절대 하지 마세요.
+5. **절대로 <꺽쇠 괄호>를 사용하지 마세요.**
 """
 
 
@@ -241,10 +271,19 @@ def generate_rag_response_stream(user_id, user_input):
         print(f"\n[INFO] RAG PROCESS START")
         print(f"[INFO] User Input: {user_input}")
 
-        diary_context = get_user_context(user_id, user_input)
-        print(f"[INFO] Retrieved Diary Context:\n{diary_context}\n")
+        # [핵심 수정 1] 일상 대화인지 판별하여 불필요한 일기 로드를 막음 (안전필터 방지)
+        daily_keywords = ["메뉴", "저녁", "점심", "아침", "날씨", "추천해", "안녕", "반가워"]
+        is_daily_talk = any(keyword in user_input for keyword in daily_keywords)
 
-        system_prompt = build_system_prompt(diary_context)
+        diary_context = ""
+        if not is_daily_talk:
+            diary_context = get_user_context(user_id, user_input)
+            print(f"[INFO] Retrieved Diary Context:\n{diary_context}\n")
+        else:
+            print("[INFO] Daily talk detected. Skipping diary context retrieval.")
+
+        # [수정] 분리된 시스템 프롬프트 적용
+        system_prompt = build_system_prompt(diary_context, is_daily_talk)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -256,15 +295,19 @@ def generate_rag_response_stream(user_id, user_input):
             "Authorization": f"Bearer {HCX_API_KEY}"
         }
 
+        # [수정] 기본 페이로드 구성 (Tool 일단 제외)
         payload = {
             "messages": messages,
-            "tools": create_tools(),
-            "toolChoice": "auto",
             "topP": 0.8,
-            "temperature": 0.6,
+            "temperature": 0.7 if is_daily_talk else 0.4,  # 일상 대화일 때는 창의성을 살짝 높임
             "maxTokens": 1024,
             "stream": False
         }
+
+        # [수정] 검색/지원이 필요한 상황에서만 Tool을 주입
+        if not is_daily_talk:
+            payload["tools"] = create_tools()
+            payload["toolChoice"] = "auto"
 
         print("[INFO] Requesting 1st HCX API (Tool or Direct Answer)...")
         response = requests.post(HCX_RAG_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
@@ -278,7 +321,8 @@ def generate_rag_response_stream(user_id, user_input):
         print(f"[INFO] 1st HCX Response:\n{json.dumps(result_json, indent=2, ensure_ascii=False)}\n")
 
         result_obj = result_json.get("result", {})
-        message_obj = result_obj.get("message", {}) if "message" in result_obj else result_obj.get("choices", [{}])[0].get("message", {})
+        message_obj = result_obj.get("message", {}) if "message" in result_obj else result_obj.get("choices", [{}])[
+            0].get("message", {})
         full_content = safe_text(message_obj.get("content"))
         tool_calls = message_obj.get("tool_calls") or message_obj.get("toolCalls") or []
 
@@ -287,19 +331,14 @@ def generate_rag_response_stream(user_id, user_input):
             print(f"[INFO] Tool Call Detected: {len(tool_calls)} tools")
             yield "<think>당신에게 도움이 될 만한 정보를 열심히 찾아보고 있어요...</think>\n"
 
-            # 누수된 JSON 텍스트 청소 후 전송
-            clean_first_content = clean_ai_text(full_content)
-            if clean_first_content:
-                yield from stream_text(clean_first_content + "\n")
-
             messages.append(message_obj)
 
-            last_tool = ""
             for tool in tool_calls:
                 try:
                     tool_name = tool["function"]["name"]
-                    last_tool = tool_name
-                    args = json.loads(tool["function"]["arguments"]) if isinstance(tool["function"]["arguments"], str) else tool["function"]["arguments"]
+                    args = json.loads(tool["function"]["arguments"]) if isinstance(tool["function"]["arguments"],
+                                                                                   str) else tool["function"][
+                        "arguments"]
                     tool_query = safe_text(args.get("query"))
                     tool_id = tool.get("id") or tool.get("toolCallId")
 
@@ -308,10 +347,13 @@ def generate_rag_response_stream(user_id, user_input):
                     search_result = execute_vector_search(tool_query, collection_name)
                     print(f"[INFO] Tool Result Length: {len(search_result)}")
 
+                    # HCX API 규격에 맞게 Tool 결과 삽입 (name, tool_call_id 필수)
                     messages.append({
                         "role": "tool",
-                        "toolCallId": tool_id,
-                        "content": search_result
+                        "tool_call_id": tool_id,
+                        "id": tool_id,
+                        "name": tool_name,
+                        "content": search_result if search_result else "관련 정보가 없습니다."
                     })
                 except Exception as e:
                     print(f"[ERROR] TOOL ERROR: {e}")
@@ -320,7 +362,7 @@ def generate_rag_response_stream(user_id, user_input):
                 "messages": messages,
                 "toolChoice": "none",
                 "topP": 0.8,
-                "temperature": 0.6,
+                "temperature": 0.4,
                 "maxTokens": 1024,
                 "stream": False
             }
@@ -331,20 +373,18 @@ def generate_rag_response_stream(user_id, user_input):
             if second_res.status_code == 200:
                 second_json = second_res.json()
                 print(f"[INFO] 2nd HCX Response:\n{json.dumps(second_json, indent=2, ensure_ascii=False)}\n")
-                second_message_obj = second_json.get("result", {}).get("message", {}) if "message" in second_json.get("result", {}) else second_json.get("result", {}).get("choices", [{}])[0].get("message", {})
+                second_message_obj = second_json.get("result", {}).get("message", {}) if "message" in second_json.get(
+                    "result", {}) else second_json.get("result", {}).get("choices", [{}])[0].get("message", {})
                 final_content = safe_text(second_message_obj.get("content"))
             else:
+                print(f"[ERROR] 2nd API Failed: {second_res.status_code}, {second_res.text}")
                 final_content = ""
 
             final_content = clean_ai_text(final_content)
 
-            # [Tool 예외 처리] 안전 필터 발동 시
+            # 억지스러운 하드코딩 제거, 자연스러운 에러 핸들링
             if not final_content:
-                print("[WARN] 2nd Answer is empty. Fallback triggered.")
-                if last_tool == "search_welfare":
-                    final_content = "월세나 생활비 문제로 마음고생이 진짜 많으시죠. 혼자 고민하지 마시고 가까운 동네 주민센터에 가시면 '주거급여' 같은 지원을 꼼꼼히 상담받으실 수 있어요. 꼭 한번 들러보세요. 제가 항상 응원할게요!"
-                else:
-                    final_content = "혼자서 다 감당하려고 하면 너무 무겁잖아요. 제가 찾아보니 가까운 보건소나 정신건강복지센터에서 마음을 나눌 수 있다고 해요. 시간 날 때 가벼운 산책 겸 한번 들러보는 건 어떨까요? 언제든 제가 이야기 들어줄게요."
+                final_content = "원하시는 정보를 찾는 데 잠시 오류가 있었어요. 다시 한 번 물어봐 주시겠어요?"
 
             yield from stream_text(final_content)
 
@@ -354,30 +394,10 @@ def generate_rag_response_stream(user_id, user_input):
 
             full_content = clean_ai_text(full_content)
 
-            # [스마트 폴백] 안전 필터 발동 시 - 실제 데이터 기반으로 직접 응답 생성
+            # 호주 여행 하드코딩 제거 및 자연스러운 폴백
             if not full_content:
                 print("[WARN] 1st Answer is empty (Safety Filter Hit). Smart Fallback triggered.")
-                
-                # 다이어리 컨텍스트에서 첫 번째 기록의 내용을 추출하여 직접 응답
-                try:
-                    # diary_context는 "날짜: ...\n당시 기분: ...\n내용: ...\n\n" 구조임
-                    first_record = diary_context.split("\n\n")[0]
-                    if "내용:" in first_record:
-                        # 내용을 안전하게 파싱
-                        record_lines = first_record.split("\n")
-                        record_date = record_lines[0].replace("날짜:", "").strip()
-                        record_content = ""
-                        for line in record_lines:
-                            if line.startswith("내용:"):
-                                record_content = line.replace("내용:", "").strip()[:100]
-                                break
-                        
-                        full_content = f"죄송해요, 잠시 생각이 엉켰어요! 하지만 제가 기억하기론 {record_date}에 이런 일이 있었던 것 같아요: '{record_content}...' 이 내용이 찾으시는 게 맞을까요?"
-                    else:
-                        full_content = "요즘 정말 고생 많으셨죠. 제가 예전 일기들을 읽어보니 즐거웠던 기억들이 참 많더라고요. 오늘은 무리하지 말고 푹 쉬면서 기운 차리셨으면 좋겠어요."
-                except Exception as fe:
-                    print(f"[FALLBACK ERROR] {fe}")
-                    full_content = "오늘 하루도 버티느라 정말 고생 많았어요. 제가 항상 곁에서 이야기 들어줄게요. 언제든 편하게 말해줘요."
+                full_content = "제가 잠시 딴생각을 하느라 말씀을 놓쳤네요. 방금 하신 말씀 다시 한 번 들려주시겠어요? 아니면 마음이 무거우실 때 언제든 편하게 털어놓아 주세요."
 
             yield from stream_text(full_content)
 
