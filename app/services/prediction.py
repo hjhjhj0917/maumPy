@@ -37,6 +37,10 @@ except Exception as e:
     tokenizers = {}
 
 
+# =====================================================================
+# 여기서부터 필수 유틸 함수들입니다! (이 부분이 지워져서 에러가 났습니다)
+# =====================================================================
+
 def get_analysis_summary(final_level):
     summary_map = {
         0: "정상 범위 내의 정서 상태",
@@ -60,6 +64,11 @@ def split_into_chunks(text, window=3, step=2):
     return chunks
 
 
+# =====================================================================
+# 필수 유틸 함수 끝
+# =====================================================================
+
+
 def analyze_diary(content: str, disease_type: str = "depression"):
     # 3. 함수 안에서는 매번 로드하지 않고, 이미 올라간 전역 변수를 '사용'만 합니다.
     global sentiment_pipeline
@@ -73,13 +82,13 @@ def analyze_diary(content: str, disease_type: str = "depression"):
             "dep_res": {"final_level": 0, "raw_score": 0.0, "is_symptom": False}
         }
 
+    # 여기서 방금 복구한 split_into_chunks 함수를 사용합니다.
     chunks = split_into_chunks(content, window=3, step=2)
     is_all_clearly_positive = True
 
     # 1차 분류: 긍정적인 내용인지 빠른 확인
     for chunk in chunks:
         sentiment_result = sentiment_pipeline(chunk)[0]
-        # (기존 로직 유지) 라벨이나 스코어 기준
         if sentiment_result['label'] != '1' or sentiment_result['score'] <= 0.70:
             is_all_clearly_positive = False
             break
