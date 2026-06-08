@@ -1,8 +1,6 @@
 import os
 import json
 import random
-import platform
-from datetime import datetime
 import numpy as np
 import pandas as pd
 import torch
@@ -209,25 +207,21 @@ print(f"Binary F1: {binary_f1 * 100:.2f}%")
 print(classification_report(labels, preds, digits=4))
 print(confusion_matrix(labels, preds))
 
-# --- 기존 코드 맨 아래에 이어서 추가 ---
 
-print("\n===== 🎯 최적의 Threshold(임계값) 찾기 =====")
+print("\n===== Threshold(임계값) 찾기 =====")
 
-# trainer.predict()로 뽑아둔 확률 값(probs) 재사용
 best_threshold = 0.5
 best_f1 = 0.0
 
-# 0.40 부터 0.60 까지 0.05 단위로 테스트
 for t in np.arange(0.40, 0.65, 0.05):
     temp_preds = (probs[:, 1] >= t).astype(int)
 
     temp_acc = accuracy_score(labels, temp_preds)
     temp_binary_f1 = f1_score(labels, temp_preds, average="binary")
-    temp_recall = f1_score(labels, temp_preds, average="binary")  # recall 확인용
+    temp_recall = f1_score(labels, temp_preds, average="binary")
 
     print(f"[Threshold {t:.2f}] Accuracy: {temp_acc * 100:.2f}% | Binary F1: {temp_binary_f1 * 100:.2f}%")
 
-    # 혼동 행렬 간략 출력
     cm = confusion_matrix(labels, temp_preds)
     print(f"  -> 정상오해(FP): {cm[0][1]}명 | 환자놓침(FN): {cm[1][0]}명 | 환자찾음(TP): {cm[1][1]}명\n")
 
@@ -235,4 +229,4 @@ for t in np.arange(0.40, 0.65, 0.05):
         best_f1 = temp_binary_f1
         best_threshold = t
 
-print(f"💡 결론: 이 모델의 최고 성능은 Threshold가 {best_threshold:.2f} 일 때, Binary F1 {best_f1 * 100:.2f}% 입니다!")
+print(f"결론: 이 모델의 최고 성능은 Threshold가 {best_threshold:.2f} 일 때, Binary F1 {best_f1 * 100:.2f}% 입니다!")
