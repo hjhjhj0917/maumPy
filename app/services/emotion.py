@@ -46,22 +46,48 @@ def split_into_chunks(text, window=3, step=2):
 
 
 def analyze_emotions(text):
+    # content를 문장단위로 3문장씩 그리고 다은 2문장은 건너뛰고 다시 3문장씩 반복
+    # 굳이 겹치게 설정한 이유는 글 전체에 흐름이 끊기지 않기 위함
     chunks = split_into_chunks(text, window=3, step=2)
     all_probs = []
 
+    # with torch.no_grad() 이거는 추론 모델을 활성화해서 메모리 성능을 올림 (no gradient 기울기 계산)
     with torch.no_grad():
         for chunk in chunks:
-            inputs = tokenizer(chunk, return_tensors="pt", truncation=True, padding=True, max_length=512).to(DEVICE)
-            outputs = model(**inputs)
+            # inputs는 모델 분석에 사용될 텍스트를 토큰화 하는 과정임
+            inputs = tokenizer(
+                chunk,
+                return_tensors="pt",  # 반환 객체를 텐서 객체로 변환하라
+                padding=True,  # 모델이 처리할 수 있는 최대 길이에 맞춰서 짧은 텍스트는 공백을 채워 길이를 맞춤
+                truncation=True,  # 최대 길이가 넘어가면 자르는 설정
+                max_length=512  # 토큰 수 최대 길이 설정
+            ).to(DEVICE)  # 연산 기기 설정
+
+            # ** 은 딕셔너리 구조를 풀어헤쳐 인자로 전달함
+            outputs = model(**inputs) # 모델에 inputs 넣어서 분석하여 Logits 형태의 값을 얻음
+
+            # 각 감정 카테고리별 독립 확률을 Sigmoid로 산출하여 복합적인 감정 상태를 추출
+            # cpu는 결과를 cpu 메모리로 가져오기 위함이고 그 이유는 numpy를 사용하기 위함이다
+            # numpy는 최종적인 결과를 다른 라이브러리에서 활용하기 위한 표준언어이기 때문에 사용함
+            # 모델에 출력구조는 2차원 배열이므로 flatten을 사용해서 1차원 배열로 변환해 데이터 구조를 단순화 함
             probs = torch.sigmoid(outputs.logits).cpu().numpy().flatten()
+
             all_probs.append(probs)
 
+    # chuking으로 분리돼서 분석된 결과를 axis=0(세로방향) 감정별로 평균을 내는 함수
     avg_probs = np.mean(all_probs, axis=0)
+
+    # 분석된 감정 결과를 사용자가 확인 가능한 형태의 감정이름으로 매핑
     raw_results = {KOTE_LABELS[i]: float(avg_probs[i]) for i in range(len(KOTE_LABELS))}
 
+    # 메인 감정을 찾기위해서 분석된 감정들 중에서 최댓값을 찾는데
+    # key=raw_results.get 이 옵션을 통해 분석된 값끼리 최댓값을 찾음
     main_emotion = max(raw_results, key=raw_results.get)
+
+    # 위 에서 찾은 메인 감정명을 통해서 그 값을 구함
     max_prob = raw_results[main_emotion]
 
+    # 메인 감정 색상 매핑
     if max_prob < 0.15 or main_emotion == '없음':
         main_emotion = "무감정"
         main_color = "#9E9E9E"
