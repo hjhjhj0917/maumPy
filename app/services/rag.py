@@ -14,10 +14,7 @@ HCX_RAG_URL = os.getenv("HCX_RAG_URL")
 REQUEST_TIMEOUT = 30
 
 
-# =========================================================
 # 공통 유틸
-# =========================================================
-
 def safe_text(value):
     if value is None:
         return ""
@@ -48,10 +45,7 @@ def stream_text(text, delay=0.005):
         time.sleep(delay)
 
 
-# =========================================================
 # 사용자 일기(기억) 검색 및 컨텍스트 가공
-# =========================================================
-
 def get_user_context(user_id, user_input=None):
     try:
         try:
@@ -159,10 +153,7 @@ def get_user_context(user_id, user_input=None):
         return "일기 기록을 불러올 수 없습니다."
 
 
-# =========================================================
 # 정책 / 기관 벡터 검색 (Tool)
-# =========================================================
-
 def execute_vector_search(query_text, collection_name):
     try:
         query_vector = generate_hcx_embedding(query_text)
@@ -198,12 +189,8 @@ def execute_vector_search(query_text, collection_name):
         return "데이터베이스 검색 중 오류가 발생했습니다."
 
 
-# =========================================================
 # 마스터 시스템 프롬프트 (안전필터 우회 및 팩트 강화)
-# =========================================================
-
 def build_system_prompt(diary_context, is_daily_talk=False):
-    # [수정] 일상 대화일 때와 검색이 필요할 때의 프롬프트를 완전히 분리
     if is_daily_talk:
         return """
 당신은 사용자와 편안하게 일상을 나누는 다정하고 따뜻한 챗봇 '마음'입니다.
@@ -229,10 +216,7 @@ def build_system_prompt(diary_context, is_daily_talk=False):
 """
 
 
-# =========================================================
 # Tool 정의 (Function Calling)
-# =========================================================
-
 def create_tools():
     return [
         {
@@ -262,10 +246,7 @@ def create_tools():
     ]
 
 
-# =========================================================
 # 메인 RAG & HCX 연동 스트림
-# =========================================================
-
 def generate_rag_response_stream(user_id, user_input):
     try:
         print(f"\n[INFO] RAG PROCESS START")
