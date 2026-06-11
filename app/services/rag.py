@@ -1,6 +1,8 @@
 import os
 import json
 import time
+import uuid
+
 import requests
 import re
 
@@ -53,16 +55,16 @@ def get_user_context(user_id, user_input=None):
         except:
             user_no = user_id
 
-        # 1. 최신 일기 (최근 7개로 확대)
+        # 1. 최신 일기 7개
         recent_diaries = list(
             db["DIARY_LOGS"].find({"USER_NO": user_no}).sort("REG_DT", -1).limit(7)
         )
 
         relevant_diaries = []
 
-        # 2. 질문 관련 과거 일기 (Vector Search 검색량 및 정확도 향상)
+        # 2. 질문 관련 과거 일기
         if user_input:
-            query_vector = generate_hcx_embedding(user_input)
+            query_vector = generate_hcx_embedding(user_input) # 사용자 텍스트 임베딩
             if query_vector:
                 # [Resilient Pipeline] 필터 인덱스 미설정 시에도 작동하도록 2단계로 시도
                 try:
@@ -138,7 +140,7 @@ def get_user_context(user_id, user_input=None):
         combined.sort(key=lambda x: x.get("REG_DT") or datetime.min, reverse=True)
 
         context = ""
-        for d in combined:
+        for d in combined: # 내용 추출 및 용약 날짜 형식 맞춤
             date_value = d.get("DATE") or d.get("date") or d.get("REG_DT")
             date_str = date_value.strftime("%Y년 %m월 %d일") if isinstance(date_value, datetime) else safe_text(date_value)
             content = safe_text(d.get("CONTENT"))[:800]
@@ -156,11 +158,11 @@ def get_user_context(user_id, user_input=None):
 # 정책 / 기관 벡터 검색 (Tool)
 def execute_vector_search(query_text, collection_name):
     try:
-        query_vector = generate_hcx_embedding(query_text)
+        query_vector = generate_hcx_embedding(query_text) # 핵심 단어를 임베딩
         if not query_vector:
             return "관련 정보를 찾을 수 없습니다."
 
-        pipeline = [
+        pipeline = [ # 벡터 서치 요청 파이프 라인에 맞게 구조 생성
             {
                 "$vectorSearch": {
                     "index": "vector_index",
@@ -172,17 +174,17 @@ def execute_vector_search(query_text, collection_name):
             }
         ]
 
-        results = list(db[collection_name].aggregate(pipeline))
+        results = list(db[collection_name].aggregate(pipeline)) # Vector Search로 받아오 데이터 변수에 저장
         if not results:
             return "검색된 결과가 없습니다."
 
         context = ""
         for doc in results:
-            if collection_name == "PUBLIC_SVC":
+            if collection_name == "PUBLIC_SVC": # LLM이 읽기 쉬운 형태로 가공
                 context += f"정책명: {safe_text(doc.get('SVC_NM'))}, 상세내용: {safe_text(doc.get('SVC_DTL'))}, 지원대상: {safe_text(doc.get('TARGET'))}, 신청방법: {safe_text(doc.get('METHOD'))}\n"
             else:
                 context += f"기관구분: {safe_text(doc.get('CATEGORY'))}, 기관명: {safe_text(doc.get('NAME'))}, 주소: {safe_text(doc.get('ADDR'))}, 연락처/홈페이지: {safe_text(doc.get('HOMEPAGE'))}\n"
-        return context.strip()
+        return context.strip() # 앞뒤 공백 제거
 
     except Exception as e:
         print(f"[VECTOR SEARCH ERROR] {e}")
@@ -252,18 +254,19 @@ def generate_rag_response_stream(user_id, user_input):
         print(f"\n[INFO] RAG PROCESS START")
         print(f"[INFO] User Input: {user_input}")
 
-        # [핵심 수정 1] 일상 대화인지 판별하여 불필요한 일기 로드를 막음 (안전필터 방지)
+        # 일상 대화인지 판별하여 불필요한 일기 로드를 막음 (안전필터 방지)
         daily_keywords = ["메뉴", "저녁", "점심", "아침", "날씨", "추천해", "안녕", "반가워"]
         is_daily_talk = any(keyword in user_input for keyword in daily_keywords)
 
         diary_context = ""
-        if not is_daily_talk:
+
+        if not is_daily_talk: # 일상 대화 판별 해서 일기를 로드할지 말지 정함
             diary_context = get_user_context(user_id, user_input)
             print(f"[INFO] Retrieved Diary Context:\n{diary_context}\n")
         else:
             print("[INFO] Daily talk detected. Skipping diary context retrieval.")
 
-        # [수정] 분리된 시스템 프롬프트 적용
+        # 분리된 시스템 프롬프트 적용
         system_prompt = build_system_prompt(diary_context, is_daily_talk)
 
         messages = [
@@ -273,10 +276,12 @@ def generate_rag_response_stream(user_id, user_input):
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {HCX_API_KEY}"
+            'Accept': 'application/json',
+            "Authorization": f"Bearer {HCX_API_KEY}",
+            'X-NCP-CLOVASTUDIO-REQUEST-ID': str(uuid.uuid4())
         }
 
-        # [수정] 기본 페이로드 구성 (Tool 일단 제외)
+        # 기본 페이로드 구성 (Tool 일단 제외)
         payload = {
             "messages": messages,
             "topP": 0.8,
@@ -285,8 +290,8 @@ def generate_rag_response_stream(user_id, user_input):
             "stream": False
         }
 
-        # [수정] 검색/지원이 필요한 상황에서만 Tool을 주입
-        if not is_daily_talk:
+        # 검색/지원이 필요한 상황에서만 Tool을 주입
+        if not is_daily_talk: # Fuction Calling 으로 AI가 자동으로 적절한 도구를 호출
             payload["tools"] = create_tools()
             payload["toolChoice"] = "auto"
 
@@ -298,16 +303,16 @@ def generate_rag_response_stream(user_id, user_input):
             yield from stream_text("서버가 잠시 피곤한가 봐요. 조금만 이따가 다시 이야기해요.")
             return
 
-        result_json = response.json()
+        result_json = response.json() # 여기서 생성된 답변을 딕셔너리 타입으로 변경
         print(f"[INFO] 1st HCX Response:\n{json.dumps(result_json, indent=2, ensure_ascii=False)}\n")
 
-        result_obj = result_json.get("result", {})
+        result_obj = result_json.get("result", {}) # 응답을 어떠한 형태든 서버에러 없이 답변 도구를 추출하는 과정
         message_obj = result_obj.get("message", {}) if "message" in result_obj else result_obj.get("choices", [{}])[
             0].get("message", {})
         full_content = safe_text(message_obj.get("content"))
         tool_calls = message_obj.get("tool_calls") or message_obj.get("toolCalls") or []
 
-        # ================== Tool Call 처리 ==================
+        # Tool Call 처리
         if tool_calls:
             print(f"[INFO] Tool Call Detected: {len(tool_calls)} tools")
             yield "<think>당신에게 도움이 될 만한 정보를 열심히 찾아보고 있어요...</think>\n"
@@ -316,16 +321,16 @@ def generate_rag_response_stream(user_id, user_input):
 
             for tool in tool_calls:
                 try:
-                    tool_name = tool["function"]["name"]
+                    tool_name = tool["function"]["name"] # AI가 분석한 함수명을 가져옴
                     args = json.loads(tool["function"]["arguments"]) if isinstance(tool["function"]["arguments"],
                                                                                    str) else tool["function"][
-                        "arguments"]
-                    tool_query = safe_text(args.get("query"))
+                        "arguments"] # API 규격에 맞게 매개변수 타입 변경
+                    tool_query = safe_text(args.get("query")) # args에서 query 부분 출력, safe_text로 공백등을 제거, 핵심 단어
                     tool_id = tool.get("id") or tool.get("toolCallId")
 
                     print(f"[INFO] Executing {tool_name} with query: {tool_query}")
-                    collection_name = "MENTAL_INST" if tool_name == "search_hospital" else "PUBLIC_SVC"
-                    search_result = execute_vector_search(tool_query, collection_name)
+                    collection_name = "MENTAL_INST" if tool_name == "search_hospital" else "PUBLIC_SVC" # 호출한 도구 명과 컬렉션 명을 매핑
+                    search_result = execute_vector_search(tool_query, collection_name) # Vector Search 수행
                     print(f"[INFO] Tool Result Length: {len(search_result)}")
 
                     # HCX API 규격에 맞게 Tool 결과 삽입 (name, tool_call_id 필수)
@@ -352,16 +357,16 @@ def generate_rag_response_stream(user_id, user_input):
             second_res = requests.post(HCX_RAG_URL, headers=headers, json=second_payload, timeout=REQUEST_TIMEOUT)
 
             if second_res.status_code == 200:
-                second_json = second_res.json()
+                second_json = second_res.json() # 텍스트 가공
                 print(f"[INFO] 2nd HCX Response:\n{json.dumps(second_json, indent=2, ensure_ascii=False)}\n")
                 second_message_obj = second_json.get("result", {}).get("message", {}) if "message" in second_json.get(
                     "result", {}) else second_json.get("result", {}).get("choices", [{}])[0].get("message", {})
-                final_content = safe_text(second_message_obj.get("content"))
+                final_content = safe_text(second_message_obj.get("content")) # 응답을 어떠한 형태든 서버에러 없이 답변 도구를 추출하는 과정
             else:
                 print(f"[ERROR] 2nd API Failed: {second_res.status_code}, {second_res.text}")
                 final_content = ""
 
-            final_content = clean_ai_text(final_content)
+            final_content = clean_ai_text(final_content) # 불필요한 기호 제거
 
             # 억지스러운 하드코딩 제거, 자연스러운 에러 핸들링
             if not final_content:
@@ -373,9 +378,9 @@ def generate_rag_response_stream(user_id, user_input):
         else:
             print("[INFO] No Tool Call. Direct Answer.")
 
-            full_content = clean_ai_text(full_content)
+            full_content = clean_ai_text(full_content) # 불필요한 기호 제거
 
-            # 호주 여행 하드코딩 제거 및 자연스러운 폴백
+            # 자연스러운 폴백
             if not full_content:
                 print("[WARN] 1st Answer is empty (Safety Filter Hit). Smart Fallback triggered.")
                 full_content = "제가 잠시 딴생각을 하느라 말씀을 놓쳤네요. 방금 하신 말씀 다시 한 번 들려주시겠어요? 아니면 마음이 무거우실 때 언제든 편하게 털어놓아 주세요."
