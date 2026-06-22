@@ -9,7 +9,7 @@
 
 ### Language & Framework
 - **Language**: Python
-- **Framework**: Flask
+- **Framework**: FastAPI
 - **AI/ML**: PyTorch, Hugging Face Transformers
 
 ### AI Models
