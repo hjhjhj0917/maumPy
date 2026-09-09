@@ -9,12 +9,12 @@
 
 ### Language & Framework
 - **Language**: Python
-- **Framework**: Flask
+- **Framework**: FastAPI
 - **AI/ML**: PyTorch, Hugging Face Transformers
 
 ### AI Models
 - **HyperCLOVA X**: 임베딩 V2, HCX-007, RAG Reasoning
-- **LLM / NLP**: KoELECTRA, klue/bert-base
+- **LLM / NLP**: KoELECTRA, klue/roberta-base
 
 ### Database
 - **Vector DB**: MongoDB Atlas Vector Search
@@ -24,7 +24,7 @@
 ## Key Features (AI & Data)
 
 ### 1. AI Hub 심리상담 데이터 기반 우울증 예측 모델
-- AI Hub에서 제공하는 양질의 심리상담 데이터를 활용하여 `klue/bert-base` 모델을 파인튜닝(`kluebert_train.py`)했습니다.
+- AI Hub에서 제공하는 양질의 심리상담 데이터를 활용하여 `klue/roberta-base` 모델을 파인튜닝(`kluebert_train.py`)했습니다.
 - 학습된 모델(`trained_model_depression_binary`)을 통해 사용자가 작성한 일기 텍스트 내의 우울증 징후를 이진 분류 및 수치화하여 분석합니다(`prediction.py`).
 
 ### 2. KoELECTRA 기반 정밀 감정 분석
@@ -60,5 +60,5 @@
      ├── data_extractor.py        # 학습 데이터 추출 및 전처리
      ├── fetch_mental_inst.py     # 정신건강 상담 기관 데이터 수집
      ├── fetch_public_svc.py      # 공공 서비스 데이터 수집
-     ├── kluebert_train.py        # klue/bert-base 우울증 모델 학습 파이프라인
+     ├── kluebert_train.py        # klue/roberta-base 우울증 모델 학습 파이프라인
      └── migrate_addresses.py     # 주소 데이터 마이그레이션
