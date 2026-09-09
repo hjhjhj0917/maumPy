@@ -1,0 +1,79 @@
+import os
+import json
+import base64
+
+import requests
+from dotenv import load_dotenv
+from google.auth.transport.requests import Request
+from google.oauth2 import service_account
+
+load_dotenv()
+
+# 서비스 계정 JSON 키의 "내용 전체"를 환경변수 값으로 저장 (.env의 GCP_TTS_CREDENTIALS_JSON)
+GCP_TTS_CREDENTIALS_JSON = os.getenv("GCP_TTS_CREDENTIALS_JSON")
+
+TTS_API_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
+
+# 챗봇 답변에 사용할 음색 (환경변수로 오버라이드 가능)
+# 기본값은 Chirp 3: HD 라인 (2026년 기준 Google이 제공하는 가장 자연스럽고 고품질인 음성)
+TTS_VOICE_NAME = os.getenv("TTS_VOICE_NAME", "ko-KR-Chirp3-HD-Leda")
+TTS_LANGUAGE_CODE = "ko-KR"
+
+# 말하기 속도 (0.25 ~ 4.0, 1.0이 기본 속도). 환경변수로 오버라이드 가능
+# 주의: Chirp3-HD 음성은 speakingRate를 지원하지 않아, 이 음성을 쓸 때는 자동으로 무시됨
+TTS_SPEAKING_RATE = float(os.getenv("TTS_SPEAKING_RATE", "1.5"))
+
+# 지금 실제로 어떤 값이 로드됐는지 서버 시작 시점에 눈으로 바로 확인할 수 있도록 출력
+print(f"[TTS INIT] 사용 중인 음성: {TTS_VOICE_NAME}")
+
+_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
+_credentials_info = json.loads(GCP_TTS_CREDENTIALS_JSON)
+_credentials = service_account.Credentials.from_service_account_info(_credentials_info, scopes=_SCOPES)
+
+
+def _get_access_token() -> str:
+    if not _credentials.valid:
+        _credentials.refresh(Request())
+    return _credentials.token
+
+
+def synthesize_speech(text: str) -> bytes | None:
+    if not text or not text.strip():
+        return None
+
+    headers = {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': f'Bearer {_get_access_token()}'
+    }
+
+    audio_config = {"audioEncoding": "MP3"}
+
+    # Chirp3-HD 음성은 speakingRate(속도) 파라미터를 지원하지 않아서, 이 경우엔 아예 빼고 요청함
+    if "Chirp3-HD" not in TTS_VOICE_NAME:
+        audio_config["speakingRate"] = TTS_SPEAKING_RATE
+
+    payload = {
+        "input": {"text": text},
+        "voice": {
+            "languageCode": TTS_LANGUAGE_CODE,
+            "name": TTS_VOICE_NAME
+        },
+        "audioConfig": audio_config
+    }
+
+    try:
+        response = requests.post(TTS_API_URL, headers=headers, json=payload, timeout=10)
+        response.raise_for_status()
+
+        res_data = response.json()
+        audio_content_b64 = res_data.get("audioContent")
+
+        if not audio_content_b64:
+            raise Exception(f"API 응답에 오디오 데이터가 없습니다. 응답 내용: {res_data}")
+
+        return base64.b64decode(audio_content_b64)
+
+    except Exception as e:
+        print(f"[TTS ERROR] 음성 합성 실패: {e}")
+        return None

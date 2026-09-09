@@ -5,6 +5,8 @@ import uuid
 
 import requests
 import re
+import base64
+from app.services.tts import synthesize_speech
 
 from datetime import datetime
 from app.services.embedding import generate_hcx_embedding
@@ -46,6 +48,47 @@ def stream_text(text, delay=0.005):
         yield f"{formatted}\n"
         time.sleep(delay)
 
+# 문장 종결 부호(. ! ? 줄바꿈) 뒤의 공백을 기준으로 문장을 분리
+SENTENCE_SPLIT_PATTERN = re.compile(r'(?<=[.!?\n])\s+')
+
+# TTS로 보내기 전 이모지를 제거하기 위한 패턴 (화면 표시용 텍스트에는 영향 없음)
+EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"  # 이모지 전체 대역 (표정, 사물, 동물, 기호 등)
+    "\U00002600-\U000027BF"  # 기타 기호 및 딩뱃 (☀ ✨ ❤ 등)
+    "\U0001F1E0-\U0001F1FF"  # 국기
+    "\U00002B00-\U00002BFF"  # 화살표/별 등 잡기호
+    "\U0000FE0F"             # variation selector (이모지 렌더링 지시자)
+    "]+",
+    flags=re.UNICODE
+)
+
+
+def strip_emoji_for_tts(text):
+    # TTS 합성용으로만 이모지를 제거하고 앞뒤 공백을 정리함
+    return EMOJI_PATTERN.sub('', text).strip()
+
+
+def stream_text_with_audio(text):
+    """
+    답변 전체를 문장 단위로 잘라서, 문장 텍스트를 흘려보낸 직후
+    그 문장을 TTS로 변환한 오디오를 이어서 전송함
+    (토큰 단위 TTS는 음성이 끊기고, 전체 답변 후 한번에 변환은 너무 오래 기다리므로 절충안)
+    """
+    if not text:
+        return
+
+    sentences = [s.strip() for s in SENTENCE_SPLIT_PATTERN.split(text) if s.strip()]
+
+    for sentence in sentences:
+        yield from stream_text(sentence + " ")
+
+        # 화면 표시용 sentence는 그대로 두고, TTS에는 이모지를 제거한 버전만 넘김
+        tts_text = strip_emoji_for_tts(sentence)
+        audio_bytes = synthesize_speech(tts_text)
+        if audio_bytes:
+            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+            yield f"[[AUDIO]]{audio_b64}[[/AUDIO]]\n"
 
 # 사용자 일기(기억) 검색 및 컨텍스트 가공
 def get_user_context(user_id, user_input=None):
@@ -372,7 +415,7 @@ def generate_rag_response_stream(user_id, user_input):
             if not final_content:
                 final_content = "원하시는 정보를 찾는 데 잠시 오류가 있었어요. 다시 한 번 물어봐 주시겠어요?"
 
-            yield from stream_text(final_content)
+            yield from stream_text_with_audio(final_content)
 
         # ================== 일반 대화 처리 ==================
         else:
@@ -385,7 +428,7 @@ def generate_rag_response_stream(user_id, user_input):
                 print("[WARN] 1st Answer is empty (Safety Filter Hit). Smart Fallback triggered.")
                 full_content = "제가 잠시 딴생각을 하느라 말씀을 놓쳤네요. 방금 하신 말씀 다시 한 번 들려주시겠어요? 아니면 마음이 무거우실 때 언제든 편하게 털어놓아 주세요."
 
-            yield from stream_text(full_content)
+            yield from stream_text_with_audio(full_content)
 
         print("[INFO] RAG PROCESS END\n")
 
