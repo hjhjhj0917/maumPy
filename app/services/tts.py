@@ -10,7 +10,7 @@ from google.oauth2 import service_account
 load_dotenv()
 
 # 서비스 계정 JSON 키의 "내용 전체"를 환경변수 값으로 저장 (.env의 GCP_TTS_CREDENTIALS_JSON)
-GCP_TTS_CREDENTIALS_JSON = os.getenv("GCP_TTS_CREDENTIALS_JSON")
+GCP_TTS_CREDENTIALS_JSON = os.getenv("GCP_CREDENTIALS_JSON")
 
 TTS_API_URL = "https://texttospeech.googleapis.com/v1/text:synthesize"
 

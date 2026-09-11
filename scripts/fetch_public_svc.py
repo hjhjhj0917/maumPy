@@ -6,6 +6,8 @@ from datetime import datetime
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
+from app.services.embedding import generate_embedding, EMBEDDING_MODEL, EMBEDDING_DIMENSION
+
 load_dotenv()
 
 MONGO_URI = os.getenv("MONGO_URI")
@@ -13,9 +15,6 @@ MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "maum_db")
 
 GOV24_BASE_URL = os.getenv("GOV24_BASE_URL", "https://api.odcloud.kr/api")
 GOV24_API_KEY = os.getenv("GOV24_API_KEY")
-
-HCX_EMBEDDING_API_URL = os.getenv("HCX_EMBEDDING_API_URL")
-HCX_API_KEY = os.getenv("HCX_API_KEY")
 
 client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client[MONGO_DB_NAME]
@@ -26,21 +25,12 @@ def get_embedding(text):
     if not text or len(text.strip()) == 0:
         return []
 
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {HCX_API_KEY}'
-    }
-
-    payload = {"text": text[:1000]}
-
+    # Vertex AI 429(요청 제한)를 만나면 잠깐 대기 후 재시도
     for attempt in range(3):
         try:
-            response = requests.post(HCX_EMBEDDING_API_URL, headers=headers, json=payload, timeout=10)
-            response.raise_for_status()
-            return response.json().get('result', {}).get('embedding', [])
-
-        except requests.exceptions.HTTPError as e:
-            if response.status_code == 429:
+            return generate_embedding(text[:1000], task_type="RETRIEVAL_DOCUMENT")
+        except Exception as e:
+            if "429" in str(e) and attempt < 2:
                 print(f"API 속도 제한(429). 5초 대기 후 재시도... ({attempt + 1}/3)")
                 time.sleep(5)
             else:
@@ -147,6 +137,8 @@ def fetch_and_save_data():
                     "SVC_DTL": svc_dtl,
                     "TARGET": target,
                     "EMBEDDING": embedding_vector,
+                    "EMBEDDING_MODEL": EMBEDDING_MODEL,
+                    "EMBEDDING_DIM": EMBEDDING_DIMENSION,
                     "METHOD": method,
                     "DOCS": docs,
                     "URL": url_link,

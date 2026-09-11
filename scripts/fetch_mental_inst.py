@@ -4,6 +4,8 @@ import certifi
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
+from app.services.embedding import generate_embedding, EMBEDDING_MODEL, EMBEDDING_DIMENSION
+
 load_dotenv()
 
 MONGO_URI = os.getenv("MONGO_URI")
@@ -12,25 +14,9 @@ MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "maum_db")
 PUBLIC_DATA_URL = os.getenv("PUBLIC_DATA_URL")
 PUBLIC_API_KEY = os.getenv("PUBLIC_API_KEY")
 
-HCX_EMBEDDING_API_URL = os.getenv("HCX_EMBEDDING_API_URL")
-HCX_API_KEY = os.getenv("HCX_API_KEY")
-
 client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client[MONGO_DB_NAME]
 collection = db["MENTAL_INST"]
-
-
-def get_embedding(text):
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {HCX_API_KEY}'
-    }
-    payload = {"text": text}
-
-    response = requests.post(HCX_EMBEDDING_API_URL, headers=headers, json=payload, timeout=5)
-    response.raise_for_status()
-
-    return response.json().get('result', {}).get('embedding', [])
 
 
 def get_coordinates(address):
@@ -97,10 +83,10 @@ def fetch_and_save_data():
 
                 print(f"새로운 데이터 임베딩 중... : {name}")
                 search_text = f"{category} {name} {addr}"
-                embedding_vector = get_embedding(search_text)
-
-                if not embedding_vector:
-                    print(f"임베딩 실패하여 스킵: {name}")
+                try:
+                    embedding_vector = generate_embedding(search_text, task_type="RETRIEVAL_DOCUMENT")
+                except Exception as e:
+                    print(f"임베딩 실패하여 스킵: {name} - {e}")
                     continue
 
                 coordinates = get_coordinates(addr)
@@ -116,6 +102,8 @@ def fetch_and_save_data():
                     "NAME": name,
                     "ADDR": addr,
                     "EMBEDDING": embedding_vector,
+                    "EMBEDDING_MODEL": EMBEDDING_MODEL,
+                    "EMBEDDING_DIM": EMBEDDING_DIMENSION,
                     "HOMEPAGE": homepage,
                     "LOCATION": location_data
                 }

@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 from app.services.prediction import analyze_diary
 from app.services.emotion import analyze_emotions
-from app.services.summary import generate_hcx_summary
-from app.services.embedding import generate_hcx_embedding
+from app.services.summary import generate_diary_summary
+from app.services.embedding import generate_diary_embedding
 from app.core.database import diary_logs_collection
 
 router = APIRouter()
@@ -34,17 +34,17 @@ async def analyze_text(request: DiaryRequest): # 매개변수 부분에 request:
         dep_data = analyze_diary(request.content, request.disease_type)
         emo_data = analyze_emotions(request.content)
 
-        hcx_summary = generate_hcx_summary(
+        diary_summary = generate_diary_summary(
             content=request.content,
             dep_level=dep_data["dep_res"]["final_level"],
             raw_emotions=emo_data["raw_emotions"]
         )
 
         # 원본 제목과, 내용 그리고 요약한 일기 내용을 한 문장으로 합침
-        combined_text = f"제목: {request.title}\n내용: {request.content}\n요약: {hcx_summary}"
+        combined_text = f"제목: {request.title}\n내용: {request.content}\n요약: {diary_summary}"
 
         # 합친 문장을 임베딩 함수로 전달하여 실행
-        embedding_vector = generate_hcx_embedding(combined_text)
+        embedding_vector = generate_diary_embedding(combined_text)
 
         # MongoDB에 저장한 내용과 쿼리문을 정의
         update_query = {
@@ -53,7 +53,7 @@ async def analyze_text(request: DiaryRequest): # 매개변수 부분에 request:
                 "CONTENT": request.content,
                 "EMBEDDING": embedding_vector,
                 "MAIN_EMOTION": emo_data["main_emotion"],
-                "ANALYSIS_SUM": hcx_summary,
+                "ANALYSIS_SUM": diary_summary,
                 "EMO_RES": emo_data["raw_emotions"],
                 "DEP_RES": {
                     "DISEASE_TYPE": request.disease_type,
@@ -80,7 +80,7 @@ async def analyze_text(request: DiaryRequest): # 매개변수 부분에 request:
 
         # 스프링 서버로 필요한 데이터를 지정한 클래스 형식에 맞게 반환함
         return DiaryResponse(
-            analysis_summary=hcx_summary,
+            analysis_summary=diary_summary,
             main_emotion=emo_data["main_emotion"],
             main_color=emo_data["main_color"],
             dep_res=dep_data["dep_res"]

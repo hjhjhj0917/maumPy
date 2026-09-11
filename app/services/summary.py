@@ -1,17 +1,38 @@
 import os
 import re
-import uuid
+import json
 
 import requests
 from dotenv import load_dotenv
+from google.auth.transport.requests import Request
+from google.oauth2 import service_account
 
 load_dotenv()
 
-HCX_API_URL = os.getenv("HCX_API_URL")
-HCX_API_KEY = os.getenv("HCX_API_KEY")
+# embedding.py/tts.py와 동일한 서비스 계정 재사용
+GCP_CREDENTIALS_JSON = os.getenv("GCP_CREDENTIALS_JSON")
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
+GCP_LOCATION = os.getenv("GCP_LOCATION", "us-central1")
+GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash")
+
+GEMINI_API_URL = (
+    f"https://{GCP_LOCATION}-aiplatform.googleapis.com/v1/projects/{GCP_PROJECT_ID}"
+    f"/locations/{GCP_LOCATION}/publishers/google/models/{GEMINI_CHAT_MODEL}:generateContent"
+)
+
+_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
+_credentials_info = json.loads(GCP_CREDENTIALS_JSON)
+_credentials = service_account.Credentials.from_service_account_info(_credentials_info, scopes=_SCOPES)
 
 
-def generate_hcx_summary(content: str, dep_level: int, raw_emotions: dict) -> str:
+def _get_access_token() -> str:
+    if not _credentials.valid:
+        _credentials.refresh(Request())
+    return _credentials.token
+
+
+def generate_diary_summary(content: str, dep_level: int, raw_emotions: dict) -> str:
 
     # raw_emotions.items() 딕셔너리 형태의 데이터를 튜플 형태로 변경후, key는 이 수치 데이터만 비교하게 x[1]로 설정
     # sorted(, reverse=True) 를 사용해서 그 값을 역순 정력 가장 큰 값이 가장 먼저 오게
@@ -29,20 +50,17 @@ def generate_hcx_summary(content: str, dep_level: int, raw_emotions: dict) -> st
     }
     dep_status = dep_str_map.get(dep_level, "알 수 없음")
 
-    # 요청 헤더를 HCX 모델에 맞게 지정
     headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Authorization': f'Bearer {HCX_API_KEY}',
-        'X-NCP-CLOVASTUDIO-REQUEST-ID': str(uuid.uuid4())
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': f'Bearer {_get_access_token()}'
     }
 
-    # 요청 바디 부분을 역할을 분리해서 system이면 content에 모델의 역할을 지정, user면 content에 사용자 질문을 작성
+    # Gemini는 system 메시지를 별도의 systemInstruction 필드로 분리하고,
+    # 나머지 대화는 contents 배열(role: user/model)로 구성함
     payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": (
+        "systemInstruction": {
+            "parts": [{
+                "text": (
                     "당신은 텍스트의 맥락을 깊이 있게 파악하는 전문적이고 따뜻한 심리 상담가입니다. "
                     "반드시 아래의 [출력 형식]과 [제한 사항]에 맞춰 평문(Plain Text)으로만 답변하세요.\n\n"
                     "[출력 형식]\n"
@@ -54,20 +72,28 @@ def generate_hcx_summary(content: str, dep_level: int, raw_emotions: dict) -> st
                     "3. '**', '*', '#' 등 마크다운 기호와 이모지, 특수기호는 절대 사용하지 마세요.\n"
                     "4. '일기 내용 요약:', '심리 분석:' 등 어떠한 소제목이나 라벨도 달지 마세요."
                 )
-            },
+            }]
+        },
+        "contents": [
             {
                 "role": "user",
-                "content": f"일기 원문:\n{content}\n\n주요 감정:\n{emotions_str}\n\n우울 증상 단계:\n{dep_status}\n\n위 정보를 바탕으로 부드럽고 자연스럽게 이어지는 심리 분석 요약을 작성해주세요."
+                "parts": [{
+                    "text": f"일기 원문:\n{content}\n\n주요 감정:\n{emotions_str}\n\n우울 증상 단계:\n{dep_status}\n\n위 정보를 바탕으로 부드럽고 자연스럽게 이어지는 심리 분석 요약을 작성해주세요."
+                }]
             }
         ],
-        "maxCompletionTokens": 5120, # 모델 답변 최대길이 지정
-        "temperature": 0.5, # 답변의 창의성 설정 0에 가까울 수록 일관되고 보수적, 1에 가까울 수록 변동성 심하고 창의적
-        "topP": 0.8 # 생성할 단어 후보군의 상위 누적 합계를 지정 (높을수록 관련성 있는 응답 생성)
+        "generationConfig": {
+            "maxOutputTokens": 5120, # 모델 답변 최대길이 지정
+            "temperature": 0.5, # 답변의 창의성 설정 0에 가까울 수록 일관되고 보수적, 1에 가까울 수록 변동성 심하고 창의적
+            "topP": 0.8, # 생성할 단어 후보군의 상위 누적 합계를 지정 (높을수록 관련성 있는 응답 생성)
+            # rag.py와 동일한 이유로 thinking 비활성화 — 요약은 정해진 형식대로만 쓰면 되므로 추론이 불필요함
+            "thinkingConfig": {"thinkingBudget": 0}
+        }
     }
 
     try:
         # 요청 URL과 인증 정보가 든 헤더와 페이로드를 추가해 요청함
-        response = requests.post(HCX_API_URL, headers=headers, json=payload)
+        response = requests.post(GEMINI_API_URL, headers=headers, json=payload, timeout=30)
 
         # 응답 받은 결과에서 상태코드를 확인해서 에러가 났다면 에러를 발생함
         response.raise_for_status()
@@ -75,8 +101,10 @@ def generate_hcx_summary(content: str, dep_level: int, raw_emotions: dict) -> st
         # 응답 받은 JSON 형태의 텍스트를 .json을 통해서 구조에 따라 딕셔너리 형태로 바뀌어 변수에 저장함
         res_data = response.json()
 
-        # 응답 구조에 맞게 result에 message에 content로 접근해서 요약 텍스트를 불러옴
-        summary_text = res_data.get('result', {}).get('message', {}).get('content', '')
+        # Gemini 응답 구조: candidates[0].content.parts[0].text
+        candidates = res_data.get('candidates', [])
+        parts = candidates[0].get('content', {}).get('parts', []) if candidates else []
+        summary_text = parts[0].get('text', '') if parts else ''
 
         if summary_text:
             # 마크다운 및 불필요한 따옴표 제거
