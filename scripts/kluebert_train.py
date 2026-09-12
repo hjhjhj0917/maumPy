@@ -6,7 +6,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from datasets import Dataset
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
 from sklearn.utils import resample
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, \
@@ -38,6 +38,53 @@ def preprocess_text(paragraphs):
         sentences.append(text)
 
     return " ".join(sentences)
+
+
+# 상담 세션 원문은 평균 5천 토큰이 넘는데(klue/roberta-base는 최대 512 토큰까지만 처리 가능),
+# 그냥 자르면(truncation) 내용의 90% 이상이 버려져서 모델이 인사말 정도만 보고 판단하게 되는 문제가 있었음.
+# → 문서 전체를 겹치는 청크(chunk)로 나눠서 전체 내용을 다 학습/평가에 반영함
+CHUNK_MAX_LEN = 480  # [CLS]/[SEP] 특수 토큰 자리(2개)를 남기고 512에 맞춘 값
+CHUNK_STRIDE = 50    # 청크 경계에서 문맥이 뚝 끊기는 걸 완화하기 위한 겹침 구간
+
+
+def chunk_document(text, tokenizer, max_len=CHUNK_MAX_LEN, stride=CHUNK_STRIDE):
+    ids = tokenizer(text, add_special_tokens=False)["input_ids"]
+    if not ids:
+        return []
+
+    chunks = []
+    step = max_len - stride
+    for start in range(0, len(ids), step):
+        window = ids[start:start + max_len]
+        if not window:
+            break
+        chunks.append([tokenizer.cls_token_id] + window + [tokenizer.sep_token_id])
+        if start + max_len >= len(ids):
+            break
+    return chunks
+
+
+def build_chunked_dataset(df, tokenizer):
+    """
+    데이터프레임의 각 문서(세션)를 청크로 쪼개서 Hugging Face Dataset으로 만듦.
+    반환값의 doc_ids는 Dataset에는 포함하지 않고 따로 반환함
+    (평가 시 같은 문서의 청크들을 다시 묶어 집계하기 위한 용도 — 모델 입력에는 불필요).
+    """
+    input_ids_list, attention_mask_list, labels_list, doc_ids = [], [], [], []
+
+    for doc_id, row in enumerate(df.itertuples()):
+        for chunk_ids in chunk_document(row.input, tokenizer):
+            input_ids_list.append(chunk_ids)
+            attention_mask_list.append([1] * len(chunk_ids))
+            labels_list.append(row.label)
+            doc_ids.append(doc_id)
+
+    dataset = Dataset.from_dict({
+        "input_ids": input_ids_list,
+        "attention_mask": attention_mask_list,
+        "labels": labels_list
+    })
+    return dataset, doc_ids
 
 
 # 해당 경로에 .json 파일만 가져옴
@@ -80,12 +127,24 @@ df = pd.DataFrame({ # 저장된 데이터를 Pandas DataFrame 구조로 변환
     "label": labels
 })
 
-train_df, test_df = train_test_split( # 전체 데이터를 학습용과 평가용으로 분리
-    df,
-    test_size=0.2,
-    random_state=SEED,
-    stratify=df["label"]
-)
+# 파일명에서 진단군+환자번호를 묶어 환자 ID로 추출함 (예: "우울증_0001", "불안장애_0003").
+# 번호만 쓰면 서로 다른 진단군의 "0001"이 같은 사람으로 합쳐지는 오류가 생기므로 진단군명까지 포함함.
+# 이 데이터셋은 한 환자가 회기별로 여러 파일에 나뉘어 있는 구조라, 파일 단위로 무작위 분리하면
+# 같은 환자의 다른 회기가 학습/평가에 동시에 들어가서 "처음 보는 사람"이 아니라
+# "이미 본 사람의 말투"를 맞히는 것에 가까워짐(데이터 누수).
+# → 환자(그룹) 단위로 통째로 나눠서, 평가셋에는 학습 때 전혀 안 본 환자만 들어가게 함
+df["patient_id"] = df["filename"].str.extract(r"\.\s*([가-힣]+_\d+)\.")
+print("환자별 세션 수:\n", df["patient_id"].value_counts())
+print("환자별 라벨(0=정상,1=환자) 분포:\n", df.groupby("patient_id")["label"].mean())
+
+gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=SEED)
+train_idx, test_idx = next(gss.split(df, df["label"], groups=df["patient_id"]))
+train_df, test_df = df.iloc[train_idx], df.iloc[test_idx]
+
+print(f"\n[환자 단위 분리 결과] 학습 환자: {sorted(train_df['patient_id'].unique())}")
+print(f"[환자 단위 분리 결과] 평가 환자: {sorted(test_df['patient_id'].unique())}")
+print(f"학습 세션 수: {len(train_df)}, 평가 세션 수: {len(test_df)}")
+print(f"평가셋 라벨 분포: {test_df['label'].value_counts().to_dict()}")
 
 max_count = train_df["label"].value_counts().max()
 balanced_dfs = []
@@ -99,41 +158,22 @@ train_df_balanced = pd.concat(balanced_dfs).sample(frac=1, random_state=SEED).re
 
 class_weights_tensor = torch.tensor([1.0, 1.2], dtype=torch.float).to(device) # 환자 데이터를 놓치면 손실이 더 커서 가중치를 더 높게 부여
 
-# Hugging Face 전용 데이터 셋으로 변경
-train_dataset = Dataset.from_pandas(train_df_balanced)
-test_dataset = Dataset.from_pandas(test_df.reset_index(drop=True))
-
 model_name = "klue/roberta-base" # 모델 호출
 tokenizer = AutoTokenizer.from_pretrained(model_name) # 상담데이터를 모델이 처리할 수 있는 단위로 나눔
 model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2) # 마지막 출력을 2진 분류하기 위한 층을 2개로 설정
 
-# 토큰화
-def tokenize_function(examples):
-    return tokenizer(
-        examples["input"],
-        truncation=True,
-        padding=False,
-        max_length=512
-    )
-
-# 토큰화 함수를 데이터 셋 전체에 적용
-train_dataset = train_dataset.map(tokenize_function, batched=True)
-test_dataset = test_dataset.map(tokenize_function, batched=True)
-
-# 학습에 필요없는 데이터 제거
-remove_columns = [col for col in ["input", "filename", "__index_level_0__"] if col in train_dataset.column_names]
-train_dataset = train_dataset.remove_columns(remove_columns)
-test_dataset = test_dataset.remove_columns(remove_columns)
-
-# Hugging Face 학습에 맞게 label에서 이름을 labels로 변경
-train_dataset = train_dataset.rename_column("label", "labels")
-test_dataset = test_dataset.rename_column("label", "labels")
+# 문서(세션) 전체를 청크로 쪼개서 Dataset 생성. test_doc_ids는 나중에 청크별 예측을
+# 문서 단위로 다시 묶어 집계할 때 씀 (학습에는 쓰지 않음)
+train_dataset, _ = build_chunked_dataset(train_df_balanced, tokenizer)
+test_dataset, test_doc_ids = build_chunked_dataset(test_df.reset_index(drop=True), tokenizer)
 
 # 학습을 위해 형식을 파이썬 기본 리스트에서 텐서 형식으로 변경
 train_dataset.set_format("torch")
 test_dataset.set_format("torch")
 
 
+# 주의: 여기서 계산하는 지표는 "청크" 단위임(학습 중 매 epoch 조기종료/체크포인트 선택 용도).
+# 진짜 성능(한 세션 전체를 우울증으로 판단했는가)은 학습이 끝난 뒤 문서 단위로 청크를 집계해서 따로 계산함
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
     probs = torch.nn.functional.softmax(torch.tensor(logits), dim=-1).numpy() # softmax는 분석된 결과의 합이 정확히 1이 되도록 하는 함수
@@ -205,12 +245,25 @@ save_path = f"./trained_model_{disease}_binary"
 trainer.save_model(save_path)
 tokenizer.save_pretrained(save_path)
 
-# 테스트셋 예측 수행
+# 테스트셋 예측 수행 (청크 단위로 나온 결과를, 같은 세션끼리 묶어서 문서 단위로 집계함)
 predictions = trainer.predict(test_dataset)
-probs = torch.nn.functional.softmax(torch.tensor(predictions.predictions), dim=-1).numpy()
+chunk_probs = torch.nn.functional.softmax(torch.tensor(predictions.predictions), dim=-1).numpy()[:, 1]
+chunk_labels = predictions.label_ids
+
+doc_probs = {}
+doc_labels = {}
+for prob, label, doc_id in zip(chunk_probs, chunk_labels, test_doc_ids):
+    doc_probs.setdefault(doc_id, []).append(prob)
+    doc_labels[doc_id] = label  # 같은 문서의 청크는 라벨이 전부 동일함
+
+doc_ids_sorted = sorted(doc_probs.keys())
+probs_1d = np.array([np.mean(doc_probs[d]) for d in doc_ids_sorted])  # 청크 확률 평균 = 문서(세션) 확률
+probs = np.stack([1 - probs_1d, probs_1d], axis=1)  # 이후 코드가 기대하는 [정상확률, 환자확률] 형태로 맞춤
 threshold = 0.4
 preds = (probs[:, 1] >= threshold).astype(int)
-labels = predictions.label_ids
+labels = np.array([doc_labels[d] for d in doc_ids_sorted])
+
+print(f"\n(참고: 세션 {len(test_df)}개가 청크 {len(test_doc_ids)}개로 나뉘어 학습/평가에 반영됨)")
 
 # 기본 지표 출력 (정확도, F1-Score 등)
 accuracy = accuracy_score(labels, preds)
