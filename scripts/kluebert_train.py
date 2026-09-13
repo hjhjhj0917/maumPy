@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from datasets import Dataset
 from sklearn.model_selection import GroupShuffleSplit
-from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, f1_score, fbeta_score, recall_score, precision_score, classification_report, confusion_matrix
 from sklearn.utils import resample
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, \
     DataCollatorWithPadding, EarlyStoppingCallback
@@ -32,7 +32,9 @@ def preprocess_text(paragraphs):
         speaker = token.get("paragraph_speaker", "")
         text = token.get("paragraph_text", "").strip()
 
-        if not text or "상담사" in speaker:
+        # "상담사"/"상담자" 둘 다 상담사를 가리키는 표기라 "상담"으로 묶어서 필터함
+        # (전에는 "상담사"만 걸러내서 "상담자"로 표기된 상담사 발언이 내담자 발화에 섞여 들어갔음)
+        if not text or "상담" in speaker:
             continue
 
         sentences.append(text)
@@ -156,7 +158,7 @@ for label in sorted(train_df["label"].unique()): # 환자와 정상자 개수를
 
 train_df_balanced = pd.concat(balanced_dfs).sample(frac=1, random_state=SEED).reset_index(drop=True) # 개수를 맞춘 데이터를 무작위로 섞음
 
-class_weights_tensor = torch.tensor([1.0, 1.2], dtype=torch.float).to(device) # 환자 데이터를 놓치면 손실이 더 커서 가중치를 더 높게 부여
+class_weights_tensor = torch.tensor([1.0, 1.3], dtype=torch.float).to(device) # 1.5는 상위k 집계와 겹쳐 과보정(거의 전부 환자로 예측)이 나서, 1.2와 1.5 중간인 1.3으로 완만하게 조정
 
 model_name = "klue/roberta-base" # 모델 호출
 tokenizer = AutoTokenizer.from_pretrained(model_name) # 상담데이터를 모델이 처리할 수 있는 단위로 나눔
@@ -257,6 +259,8 @@ for prob, label, doc_id in zip(chunk_probs, chunk_labels, test_doc_ids):
     doc_labels[doc_id] = label  # 같은 문서의 청크는 라벨이 전부 동일함
 
 doc_ids_sorted = sorted(doc_probs.keys())
+# (상위 k개 평균 방식을 시도했었으나 클래스 가중치 조정과 겹쳐서 모델이 거의 전부를
+#  "환자"로 예측해버리는 과보정이 발생함 — 원인 분리를 위해 평균 방식으로 되돌림)
 probs_1d = np.array([np.mean(doc_probs[d]) for d in doc_ids_sorted])  # 청크 확률 평균 = 문서(세션) 확률
 probs = np.stack([1 - probs_1d, probs_1d], axis=1)  # 이후 코드가 기대하는 [정상확률, 환자확률] 형태로 맞춤
 threshold = 0.4
@@ -279,24 +283,36 @@ print(confusion_matrix(labels, preds))
 
 print("\n===== Threshold(임계값) 찾기 =====")
 
-best_threshold = 0.5
+best_threshold_f1 = 0.5
 best_f1 = 0.0
+best_threshold_f2 = 0.5
+best_f2 = 0.0
 
-# 0.40에서 0.65까지 0.05 단위로 테스트하며 가장 높은 F1 점수를 내는 임계값 탐색
-for t in np.arange(0.40, 0.65, 0.05):
+# 0.15에서 0.65까지 0.05 단위로 탐색 (기존엔 0.40부터만 봐서 recall을 더 높일 여지를 놓치고 있었음).
+# F1과 별도로 F2(recall에 2배 가중치)도 같이 계산 — 우울증 스크리닝은 놓치는 것(FN)이
+# 오탐(FP)보다 훨씬 치명적이라, F1 최고점만 보지 않고 F2 최고점도 같이 참고하기 위함
+for t in np.arange(0.15, 0.65, 0.05):
     temp_preds = (probs[:, 1] >= t).astype(int)
 
     temp_acc = accuracy_score(labels, temp_preds)
-    temp_binary_f1 = f1_score(labels, temp_preds, average="binary")
-    temp_recall = f1_score(labels, temp_preds, average="binary")
+    temp_precision = precision_score(labels, temp_preds, average="binary", zero_division=0)
+    temp_recall = recall_score(labels, temp_preds, average="binary", zero_division=0)
+    temp_binary_f1 = f1_score(labels, temp_preds, average="binary", zero_division=0)
+    temp_f2 = fbeta_score(labels, temp_preds, beta=2, average="binary", zero_division=0)
 
-    print(f"[Threshold {t:.2f}] Accuracy: {temp_acc * 100:.2f}% | Binary F1: {temp_binary_f1 * 100:.2f}%")
+    print(f"[Threshold {t:.2f}] Accuracy: {temp_acc * 100:.2f}% | Precision: {temp_precision * 100:.2f}% | "
+          f"Recall: {temp_recall * 100:.2f}% | Binary F1: {temp_binary_f1 * 100:.2f}% | F2: {temp_f2 * 100:.2f}%")
 
     cm = confusion_matrix(labels, temp_preds)
     print(f"  -> 정상오해(FP): {cm[0][1]}명 | 환자놓침(FN): {cm[1][0]}명 | 환자찾음(TP): {cm[1][1]}명\n")
 
     if temp_binary_f1 > best_f1:
         best_f1 = temp_binary_f1
-        best_threshold = t
+        best_threshold_f1 = t
+    if temp_f2 > best_f2:
+        best_f2 = temp_f2
+        best_threshold_f2 = t
 
-print(f"결론: 이 모델의 최고 성능은 Threshold가 {best_threshold:.2f} 일 때, Binary F1 {best_f1 * 100:.2f}% 입니다!")
+print(f"결론(F1 기준): Threshold {best_threshold_f1:.2f} 일 때, Binary F1 {best_f1 * 100:.2f}%")
+print(f"결론(F2 기준, recall 우선): Threshold {best_threshold_f2:.2f} 일 때, F2 {best_f2 * 100:.2f}%")
+print("스크리닝 목적상 환자를 놓치는 게 더 치명적이라면 F2 기준 threshold 사용을 추천합니다.")
