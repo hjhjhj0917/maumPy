@@ -361,8 +361,25 @@ def create_tools():
     }]
 
 
+# Spring이 넘겨준 대화 기록(Redis 저장분)을 Gemini contents 형식으로 변환.
+# role은 "user"/"bot"으로 오는데 Gemini는 "user"/"model"을 씀. <think>...</think>는
+# 스트리밍 중 화면에 잠깐 보여주는 안내 문구라 실제 대화 내용이 아니므로 제거하고 넘김
+def build_history_contents(history):
+    if not history:
+        return []
+
+    contents = []
+    for msg in history:
+        role = "model" if msg.get("role") == "bot" else "user"
+        text = re.sub(r'<think>[\s\S]*?(?:</think>|$)', '', msg.get("content", "")).strip()
+        if not text:
+            continue
+        contents.append({"role": role, "parts": [{"text": text}]})
+    return contents
+
+
 # 메인 RAG & Gemini 연동 스트림
-def generate_rag_response_stream(user_id, user_input):
+def generate_rag_response_stream(user_id, user_input, history=None):
     try:
         print(f"\n[INFO] RAG PROCESS START")
         print(f"[INFO] User Input: {user_input}")
@@ -382,7 +399,7 @@ def generate_rag_response_stream(user_id, user_input):
         # 분리된 시스템 프롬프트 적용 (Gemini는 system을 systemInstruction으로 별도 분리)
         system_prompt = build_system_prompt(diary_context, is_daily_talk)
 
-        contents = [
+        contents = build_history_contents(history) + [
             {"role": "user", "parts": [{"text": user_input}]}
         ]
 
