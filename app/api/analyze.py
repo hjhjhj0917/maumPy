@@ -1,3 +1,5 @@
+from typing import List, Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from datetime import datetime, timezone
@@ -6,6 +8,7 @@ from app.services.prediction import analyze_diary
 from app.services.emotion import analyze_emotions
 from app.services.summary import generate_diary_summary
 from app.services.embedding import generate_diary_embedding
+from app.services.music import get_music_recommendations
 from app.core.database import diary_logs_collection
 
 router = APIRouter()
@@ -19,11 +22,19 @@ class DiaryRequest(BaseModel):
     disease_type: str = "depression"
     created_at: datetime
 
+class TrackDTO(BaseModel):
+    trackId: str
+    trackName: str
+    artistName: str
+    albumImageUrl: Optional[str] = None
+    spotifyUrl: Optional[str] = None
+
 class DiaryResponse(BaseModel):
     analysis_summary: str
     main_emotion: str
     main_color: str
     dep_res: dict
+    tracks: List[TrackDTO] = []
 
 
 # api 요청이 들어오면, 여기서 실행을 함, response_model=DiaryResponse는 위에서 선언한 클래스 형태로 반환하겠다는 설정
@@ -45,6 +56,23 @@ async def analyze_text(request: DiaryRequest): # 매개변수 부분에 request:
 
         # 합친 문장을 임베딩 함수로 전달하여 실행
         embedding_vector = generate_diary_embedding(combined_text)
+
+        # 일기 원문 + 뚜렷한 감정(0.8 이상)을 바탕으로 상황에 맞는 음악을 추천함
+        music_results = get_music_recommendations(
+            content=request.content,
+            raw_emotions=emo_data["raw_emotions"],
+            main_emotion=emo_data["main_emotion"]
+        )
+        tracks = [
+            TrackDTO(
+                trackId=t["track_id"],
+                trackName=t["track_name"],
+                artistName=t["artist_name"],
+                albumImageUrl=t["album_image_url"],
+                spotifyUrl=t["spotify_url"],
+            )
+            for t in music_results
+        ]
 
         # MongoDB에 저장한 내용과 쿼리문을 정의
         update_query = {
@@ -83,7 +111,8 @@ async def analyze_text(request: DiaryRequest): # 매개변수 부분에 request:
             analysis_summary=diary_summary,
             main_emotion=emo_data["main_emotion"],
             main_color=emo_data["main_color"],
-            dep_res=dep_data["dep_res"]
+            dep_res=dep_data["dep_res"],
+            tracks=tracks
         )
     except Exception as e:
         import traceback

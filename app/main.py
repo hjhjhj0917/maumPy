@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api import analyze, chat, batch, stt, music
+from app.api import analyze, chat, batch, stt
 import uvicorn
 
 from app.services.prediction import analyze_diary
@@ -11,7 +11,6 @@ app.include_router(analyze.router)
 app.include_router(chat.router)
 app.include_router(batch.router)
 app.include_router(stt.router)
-app.include_router(music.router)
 
 @app.on_event("startup")
 async def startup_event():
