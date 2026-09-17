@@ -3,10 +3,12 @@
 scripts/data/
 .env
 *.iml
-/.idea/.gitignore
-/.idea/misc.xml
-/.idea/modules.xml
-/.idea/inspectionProfiles/profiles_settings.xml
+/.idea/
 /pyproject.toml
 /uv.lock
-/.idea/vcs.xml
+
+__pycache__/
+*.pyc
+
+# 용량이 커서 git이 아닌 별도 경로로 배포 서버에 올림
+models/
