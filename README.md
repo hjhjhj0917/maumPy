@@ -60,7 +60,11 @@ React → Spring → (이 서버)로만 요청이 흐르는 구조이며, 이 �
 - **STT**: 브라우저에서 녹음한 오디오(webm/opus)를 Google Cloud Speech-to-Text로 텍스트 변환
 - **TTS**: 챗봇 답변을 Google Cloud Text-to-Speech(Chirp3-HD 음성)로 합성해 문장 단위로 스트리밍
 
-### 4. 공공 데이터 수집 파이프라인 (`scripts/`)
+### 4. 주간 리포트 코멘트 생성 (`report.py`)
+- Spring으로부터 최근 일주일간 작성된 일기의 제목/요약/주요 감정 목록을 전달받아, Gemini로 한 주를 돌아보는 짧은 격려 코멘트를 생성합니다.
+- 다른 서비스 모듈과 동일하게 실패 시 예외를 올리는 대신 안내 문구로 대체해, 리포트 생성 실패가 마이페이지 조회 자체를 막지 않도록 합니다.
+
+### 5. 공공 데이터 수집 파이프라인 (`scripts/`)
 - 정신건강기관·청년정책 등 공공 API 데이터 수집 (`fetch_mental_inst.py`, `fetch_public_svc.py`)
 - 주소 → 좌표 변환 등 데이터 정제 (`migrate_addresses.py`)
 - 우울증 분류 모델 학습 스크립트 (`kluebert_train.py`) — 세션/문서 단위 청크 분할 + 환자 단위 데이터 분리로 데이터 누수 방지
@@ -76,6 +80,7 @@ React → Spring → (이 서버)로만 요청이 흐르는 구조이며, 이 �
 │    │    ├── analyze.py       # 일기 통합 분석(감정/우울/요약/임베딩/음악추천) 엔드포인트
 │    │    ├── batch.py         # 공공데이터 수집/마이그레이션 배치 트리거
 │    │    ├── chat.py          # RAG 챗봇 스트리밍(SSE) 엔드포인트
+│    │    ├── report.py        # 주간 리포트 코멘트 생성 엔드포인트
 │    │    └── stt.py           # 음성 인식(STT) 엔드포인트
 │    ├── core/
 │    │    ├── config.py        # 환경설정 로드
@@ -86,6 +91,7 @@ React → Spring → (이 서버)로만 요청이 흐르는 구조이며, 이 �
 │    │    ├── music.py         # 감정 기반 Spotify 음악 추천
 │    │    ├── prediction.py    # 우울증 예측 모델 추론
 │    │    ├── rag.py           # Gemini 기반 RAG 검색·응답 생성
+│    │    ├── report.py        # Gemini 기반 주간 리포트 코멘트 생성
 │    │    ├── stt.py           # Google Cloud STT 연동
 │    │    ├── summary.py       # Gemini 기반 일기 요약
 │    │    └── tts.py           # Google Cloud TTS 연동
