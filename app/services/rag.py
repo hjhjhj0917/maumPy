@@ -39,7 +39,6 @@ def _get_access_token() -> str:
 REQUEST_TIMEOUT = 30
 
 
-# 공통 유틸
 def safe_text(value):
     if value is None:
         return ""
@@ -142,7 +141,6 @@ def stream_text_with_audio(text):
             audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
             yield f"[[AUDIO]]{audio_b64}[[/AUDIO]]\n"
 
-# 사용자 일기(기억) 검색 및 컨텍스트 가공
 def get_user_context(user_id, user_input=None):
     try:
         try:
@@ -160,7 +158,7 @@ def get_user_context(user_id, user_input=None):
         # 2. 질문 관련 과거 일기
         if user_input:
             # 검색 질의이므로 RETRIEVAL_QUERY로 임베딩 (저장된 문서는 RETRIEVAL_DOCUMENT로 임베딩되어 있음)
-            query_vector = generate_embedding(user_input, task_type="RETRIEVAL_QUERY") # 사용자 텍스트 임베딩
+            query_vector = generate_embedding(user_input, task_type="RETRIEVAL_QUERY")
             if query_vector:
                 # [Resilient Pipeline] 필터 인덱스 미설정 시에도 작동하도록 2단계로 시도
                 try:
@@ -236,7 +234,7 @@ def get_user_context(user_id, user_input=None):
         combined.sort(key=lambda x: x.get("REG_DT") or datetime.min, reverse=True)
 
         context = ""
-        for d in combined: # 내용 추출 및 용약 날짜 형식 맞춤
+        for d in combined:
             date_value = d.get("DATE") or d.get("date") or d.get("REG_DT")
             date_str = date_value.strftime("%Y년 %m월 %d일") if isinstance(date_value, datetime) else safe_text(date_value)
             content = safe_text(d.get("CONTENT"))[:800]
@@ -256,11 +254,11 @@ def get_user_context(user_id, user_input=None):
 def execute_vector_search(query_text, collection_name):
     try:
         # 검색 질의이므로 RETRIEVAL_QUERY로 임베딩
-        query_vector = generate_embedding(query_text, task_type="RETRIEVAL_QUERY") # 핵심 단어를 임베딩
+        query_vector = generate_embedding(query_text, task_type="RETRIEVAL_QUERY")
         if not query_vector:
             return "관련 정보를 찾을 수 없습니다.", []
 
-        pipeline = [ # 벡터 서치 요청 파이프 라인에 맞게 구조 생성
+        pipeline = [
             {
                 "$vectorSearch": {
                     "index": "vector_index",
@@ -272,7 +270,7 @@ def execute_vector_search(query_text, collection_name):
             }
         ]
 
-        results = list(db[collection_name].aggregate(pipeline)) # Vector Search로 받아오 데이터 변수에 저장
+        results = list(db[collection_name].aggregate(pipeline))
         if not results:
             return "검색된 결과가 없습니다.", []
 
@@ -280,7 +278,7 @@ def execute_vector_search(query_text, collection_name):
         cards = []
         # 카드는 화면에 너무 많이 뜨지 않도록 상위 3개까지만 노출
         for doc in results[:3]:
-            if collection_name == "PUBLIC_SVC": # LLM이 읽기 쉬운 형태로 가공
+            if collection_name == "PUBLIC_SVC":
                 context += f"정책명: {safe_text(doc.get('SVC_NM'))}, 상세내용: {safe_text(doc.get('SVC_DTL'))}, 지원대상: {safe_text(doc.get('TARGET'))}, 신청방법: {safe_text(doc.get('METHOD'))}\n"
                 cards.append({
                     "type": "welfare",
@@ -306,7 +304,7 @@ def execute_vector_search(query_text, collection_name):
             else:
                 context += f"기관구분: {safe_text(doc.get('CATEGORY'))}, 기관명: {safe_text(doc.get('NAME'))}, 주소: {safe_text(doc.get('ADDR'))}, 연락처/홈페이지: {safe_text(doc.get('HOMEPAGE'))}\n"
 
-        return context.strip(), cards # 앞뒤 공백 제거
+        return context.strip(), cards
 
     except Exception as e:
         print(f"[VECTOR SEARCH ERROR] {e}")
@@ -385,7 +383,6 @@ def build_history_contents(history):
     return contents
 
 
-# 메인 RAG & Gemini 연동 스트림
 def generate_rag_response_stream(user_id, user_input, history=None):
     try:
         print(f"\n[INFO] RAG PROCESS START")
@@ -397,7 +394,7 @@ def generate_rag_response_stream(user_id, user_input, history=None):
 
         diary_context = ""
 
-        if not is_daily_talk: # 일상 대화 판별 해서 일기를 로드할지 말지 정함
+        if not is_daily_talk:
             diary_context = get_user_context(user_id, user_input)
             print(f"[INFO] Retrieved Diary Context:\n{diary_context}\n")
         else:
@@ -415,7 +412,6 @@ def generate_rag_response_stream(user_id, user_input, history=None):
             "Authorization": f"Bearer {_get_access_token()}"
         }
 
-        # 기본 페이로드 구성 (Tool 일단 제외)
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": contents,
@@ -430,8 +426,7 @@ def generate_rag_response_stream(user_id, user_input, history=None):
             }
         }
 
-        # 검색/지원이 필요한 상황에서만 Tool을 주입
-        if not is_daily_talk: # Fuction Calling 으로 AI가 자동으로 적절한 도구를 호출
+        if not is_daily_talk:
             payload["tools"] = create_tools()
             payload["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}
 
@@ -443,7 +438,7 @@ def generate_rag_response_stream(user_id, user_input, history=None):
             yield from stream_text("서버가 잠시 피곤한가 봐요. 조금만 이따가 다시 이야기해요.")
             return
 
-        result_json = response.json() # 여기서 생성된 답변을 딕셔너리 타입으로 변경
+        result_json = response.json()
         print(f"[INFO] 1st Gemini Response:\n{json.dumps(result_json, indent=2, ensure_ascii=False)}\n")
 
         candidates = result_json.get("candidates", [])
@@ -465,13 +460,13 @@ def generate_rag_response_stream(user_id, user_input, history=None):
             all_cards = [] # 프론트에 카드로 보여줄 구조화된 검색 결과 (정책/기관 상세는 여기서 전달, 답변 텍스트는 짧게)
             for call in function_calls:
                 try:
-                    tool_name = call.get("name") # AI가 분석한 함수명을 가져옴
-                    args = call.get("args", {}) # Gemini는 args를 이미 dict로 줌
-                    tool_query = safe_text(args.get("query")) # args에서 query 부분 출력, safe_text로 공백등을 제거, 핵심 단어
+                    tool_name = call.get("name")
+                    args = call.get("args", {})  # Gemini는 args를 이미 dict로 줌
+                    tool_query = safe_text(args.get("query"))
 
                     print(f"[INFO] Executing {tool_name} with query: {tool_query}")
-                    collection_name = "MENTAL_INST" if tool_name == "search_hospital" else "PUBLIC_SVC" # 호출한 도구 명과 컬렉션 명을 매핑
-                    search_result, cards = execute_vector_search(tool_query, collection_name) # Vector Search 수행
+                    collection_name = "MENTAL_INST" if tool_name == "search_hospital" else "PUBLIC_SVC"
+                    search_result, cards = execute_vector_search(tool_query, collection_name)
                     all_cards.extend(cards)
                     print(f"[INFO] Tool Result Length: {len(search_result)}, Cards: {len(cards)}")
 
@@ -505,7 +500,7 @@ def generate_rag_response_stream(user_id, user_input, history=None):
             second_res = requests.post(GEMINI_API_URL, headers=headers, json=second_payload, timeout=REQUEST_TIMEOUT)
 
             if second_res.status_code == 200:
-                second_json = second_res.json() # 텍스트 가공
+                second_json = second_res.json()
                 print(f"[INFO] 2nd Gemini Response:\n{json.dumps(second_json, indent=2, ensure_ascii=False)}\n")
                 second_candidates = second_json.get("candidates", [])
                 second_parts = second_candidates[0].get("content", {}).get("parts", []) if second_candidates else []
@@ -514,9 +509,8 @@ def generate_rag_response_stream(user_id, user_input, history=None):
                 print(f"[ERROR] 2nd API Failed: {second_res.status_code}, {second_res.text}")
                 final_content = ""
 
-            final_content = clean_ai_text(final_content) # 불필요한 기호 제거
+            final_content = clean_ai_text(final_content)
 
-            # 억지스러운 하드코딩 제거, 자연스러운 에러 핸들링
             if not final_content:
                 final_content = "원하시는 정보를 찾는 데 잠시 오류가 있었어요. 다시 한 번 물어봐 주시겠어요?"
 
@@ -530,9 +524,8 @@ def generate_rag_response_stream(user_id, user_input, history=None):
         else:
             print("[INFO] No Tool Call. Direct Answer.")
 
-            full_content = clean_ai_text(full_content) # 불필요한 기호 제거
+            full_content = clean_ai_text(full_content)
 
-            # 자연스러운 폴백
             if not full_content:
                 print("[WARN] 1st Answer is empty (Safety Filter Hit). Smart Fallback triggered.")
                 full_content = "제가 잠시 딴생각을 하느라 말씀을 놓쳤네요. 방금 하신 말씀 다시 한 번 들려주시겠어요? 아니면 마음이 무거우실 때 언제든 편하게 털어놓아 주세요."

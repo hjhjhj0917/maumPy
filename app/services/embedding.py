@@ -76,7 +76,6 @@ def generate_embedding(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            # 요청 URL과 인증 정보가 든 헤더와 페이로드를 추가해 요청함
             response = requests.post(EMBEDDING_API_URL, headers=headers, json=payload, timeout=15)
 
             # 429는 별도로 잡아서 재시도 대상으로 처리 (raise_for_status로 바로 예외를 던지지 않음)
@@ -89,17 +88,14 @@ def generate_embedding(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list
                 else:
                     response.raise_for_status()  # 재시도 다 소진했으면 그때는 예외로 처리
 
-            # 응답 받은 결과에서 상태코드를 확인해서 에러가 났다면 에러를 발생함
             response.raise_for_status()
 
-            # 응답 받은 JSON 형태의 텍스트를 .json을 통해서 구조에 따라 딕셔너리 형태로 바뀌어 변수에 저장함
             res_data = response.json()
             predictions = res_data.get("predictions", [])
 
             if not predictions:
                 raise Exception(f"API 응답에 예측 결과가 없습니다. 응답 내용: {res_data}")
 
-            # 응답 구조에 맞게 predictions[0].embeddings.values로 접근해서 임베딩 결과를 불러옴
             embedding_vector = predictions[0].get("embeddings", {}).get("values", [])
 
             if not embedding_vector:

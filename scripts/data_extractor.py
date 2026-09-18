@@ -37,23 +37,20 @@ def reset_data_dir():
 
 def validate_json(js):
 
-    # disease label 존재 여부
     if DISEASE not in js:
         return False
 
     label = js.get(DISEASE)
 
-    # label 이상치 제거
+    # 라벨 값이 정의된 클래스(0~3) 범위를 벗어나면 이상치로 보고 제외
     if label not in [0, 1, 2, 3]:
         return False
 
-    # paragraph 존재 여부
     paragraphs = js.get("paragraph")
 
     if not paragraphs:
         return False
 
-    # paragraph 내용 검사
     valid_sentence_count = 0
 
     for p in paragraphs:
@@ -63,7 +60,7 @@ def validate_json(js):
         if len(text) >= 2:
             valid_sentence_count += 1
 
-    # 너무 짧은 상담 제거
+    # 유효 문장이 3개 미만이면 학습에 쓰기엔 너무 짧은 상담으로 보고 제외
     if valid_sentence_count < 3:
         return False
 
@@ -81,8 +78,6 @@ def extract_and_validate_jsons(source_dir, target_dir):
     duplicate_count = 0
 
     label_counter = Counter()
-
-    # 중복 체크
     seen_contents = set()
 
     print(f"\n[{source_dir}] 탐색 시작")
@@ -121,17 +116,14 @@ def extract_and_validate_jsons(source_dir, target_dir):
 
                                 raw_data = source.read()
 
-                                # JSON 파싱
                                 js = json.loads(
                                     raw_data.decode("utf-8")
                                 )
 
-                                # 데이터 검증
                                 if not validate_json(js):
                                     invalid_count += 1
                                     continue
 
-                                # 중복 제거
                                 content_signature = json.dumps(
                                     js,
                                     ensure_ascii=False,
@@ -146,7 +138,6 @@ def extract_and_validate_jsons(source_dir, target_dir):
                                     content_signature
                                 )
 
-                                # 저장 파일명
                                 safe_name = (
                                     f"{os.path.splitext(file)[0]}"
                                     f"_{filename}"
@@ -157,7 +148,6 @@ def extract_and_validate_jsons(source_dir, target_dir):
                                     safe_name
                                 )
 
-                                # 저장
                                 with open(
                                     target_path,
                                     "w",
@@ -230,22 +220,18 @@ if __name__ == "__main__":
 
     print("\n===== 데이터 전처리 시작 =====")
 
-    # 1. data 초기화
     reset_data_dir()
 
-    # 2. Training 처리
     extract_and_validate_jsons(
         TRAIN_SOURCE,
         TRAIN_TARGET
     )
 
-    # 3. Validation 처리
     extract_and_validate_jsons(
         TEST_SOURCE,
         TEST_TARGET
     )
 
-    # 4. Leakage 검사
     check_data_leakage()
 
     print("\n===== 전처리 완료 =====")

@@ -12,17 +12,14 @@ from sklearn.utils import resample
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, \
     DataCollatorWithPadding, EarlyStoppingCallback
 
-# 학습 모델 명과 고정 시드값 42(암묵적 룰)
 disease = "depression"
-SEED = 42
+SEED = 42  # 42로 고정해 실행할 때마다 동일한 결과가 재현되게 함
 
-# 시드값을 고정 일관된 결과를 위해
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed_all(SEED)
 
-# 학습할 기기 선택
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -89,7 +86,6 @@ def build_chunked_dataset(df, tokenizer):
     return dataset, doc_ids
 
 
-# 해당 경로에 .json 파일만 가져옴
 folder_path = "./data/training"
 json_files = [f for f in os.listdir(folder_path) if f.endswith(".json")]
 
@@ -98,24 +94,23 @@ labels = []
 filenames = []
 
 for json_file in json_files:
-    file_path = os.path.join(folder_path, json_file) # 해당 경로에 json 파일 하나씩 가져옴
+    file_path = os.path.join(folder_path, json_file)
     try:
-        with open(file_path, "r", encoding="utf-8") as f: # 인코딩과 읽기 모드로 파일 오픈
-            js = json.load(f) # 파일 내용 불러옴
-            label_val = js.get(disease, 0) # 없는 값 대비
+        with open(file_path, "r", encoding="utf-8") as f:
+            js = json.load(f)
+            label_val = js.get(disease, 0)
             if label_val is None:
                 label_val = 0
 
-            label = min(max(int(label_val), 0), 3) # 이상치 제거
-            binary_label = 0 if label == 0 else 1 # 이진분류로 변경
+            label = min(max(int(label_val), 0), 3)  # 0~3 범위로 이상치 제거
+            binary_label = 0 if label == 0 else 1  # 다중 등급을 정상/환자 이진분류로 축소
 
-            paragraphs = js.get("paragraph", []) # paragraph 받아옴
-            sentence = preprocess_text(paragraphs) # 상담사 제거하고 가져옴
+            paragraphs = js.get("paragraph", [])
+            sentence = preprocess_text(paragraphs)
 
             if len(sentence.strip()) < 5:
                 continue
 
-            # 검증에 통과한 내용만 저장
             texts.append(sentence)
             labels.append(binary_label)
             filenames.append(json_file)
@@ -123,7 +118,7 @@ for json_file in json_files:
     except Exception:
         continue
 
-df = pd.DataFrame({ # 저장된 데이터를 Pandas DataFrame 구조로 변환
+df = pd.DataFrame({
     "filename": filenames,
     "input": texts,
     "label": labels
@@ -151,25 +146,25 @@ print(f"평가셋 라벨 분포: {test_df['label'].value_counts().to_dict()}")
 max_count = train_df["label"].value_counts().max()
 balanced_dfs = []
 
-for label in sorted(train_df["label"].unique()): # 환자와 정상자 개수를 확인해서 비율을 1:1로 맞춤
+# 환자/정상 개수를 1:1 비율로 맞춰 클래스 불균형을 완화함
+for label in sorted(train_df["label"].unique()):
     class_df = train_df[train_df["label"] == label]
     sampled_df = resample(class_df, replace=True, n_samples=max_count, random_state=SEED)
     balanced_dfs.append(sampled_df)
 
-train_df_balanced = pd.concat(balanced_dfs).sample(frac=1, random_state=SEED).reset_index(drop=True) # 개수를 맞춘 데이터를 무작위로 섞음
+train_df_balanced = pd.concat(balanced_dfs).sample(frac=1, random_state=SEED).reset_index(drop=True)
 
 class_weights_tensor = torch.tensor([1.0, 1.3], dtype=torch.float).to(device) # 1.5는 상위k 집계와 겹쳐 과보정(거의 전부 환자로 예측)이 나서, 1.2와 1.5 중간인 1.3으로 완만하게 조정
 
-model_name = "klue/roberta-base" # 모델 호출
-tokenizer = AutoTokenizer.from_pretrained(model_name) # 상담데이터를 모델이 처리할 수 있는 단위로 나눔
-model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2) # 마지막 출력을 2진 분류하기 위한 층을 2개로 설정
+model_name = "klue/roberta-base"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)  # 정상/환자 2진 분류
 
 # 문서(세션) 전체를 청크로 쪼개서 Dataset 생성. test_doc_ids는 나중에 청크별 예측을
 # 문서 단위로 다시 묶어 집계할 때 씀 (학습에는 쓰지 않음)
 train_dataset, _ = build_chunked_dataset(train_df_balanced, tokenizer)
 test_dataset, test_doc_ids = build_chunked_dataset(test_df.reset_index(drop=True), tokenizer)
 
-# 학습을 위해 형식을 파이썬 기본 리스트에서 텐서 형식으로 변경
 train_dataset.set_format("torch")
 test_dataset.set_format("torch")
 
@@ -178,15 +173,14 @@ test_dataset.set_format("torch")
 # 진짜 성능(한 세션 전체를 우울증으로 판단했는가)은 학습이 끝난 뒤 문서 단위로 청크를 집계해서 따로 계산함
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
-    probs = torch.nn.functional.softmax(torch.tensor(logits), dim=-1).numpy() # softmax는 분석된 결과의 합이 정확히 1이 되도록 하는 함수
+    probs = torch.nn.functional.softmax(torch.tensor(logits), dim=-1).numpy()
 
-    # 우울증 판단 기준 생성
     threshold = 0.4
     preds = (probs[:, 1] >= threshold).astype(int)
 
-    accuracy = accuracy_score(labels, preds) # 전체 데이터 중 모델이 정답을 맞힌 비율
-    macro_f1 = f1_score(labels, preds, average="macro") # 정상인과 환자 각각의 F1-score를 구한 뒤 평균
-    binary_f1 = f1_score(labels, preds, average="binary") # 우울증(환자) 레이블에 집중하여 계산한 F1-score
+    accuracy = accuracy_score(labels, preds)
+    macro_f1 = f1_score(labels, preds, average="macro")
+    binary_f1 = f1_score(labels, preds, average="binary")
 
     return {
         "accuracy": accuracy,
@@ -195,7 +189,7 @@ def compute_metrics(eval_pred):
     }
 
 
-class WeightedTrainer(Trainer): # 가중치 부여
+class WeightedTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.get("labels")
         outputs = model(**inputs)
@@ -207,7 +201,6 @@ class WeightedTrainer(Trainer): # 가중치 부여
         return (loss, outputs) if return_outputs else loss
 
 
-# 학습 환경 및 하이퍼파라미터 설정
 training_args = TrainingArguments(
     output_dir="./results",
     eval_strategy="epoch",
@@ -228,7 +221,6 @@ training_args = TrainingArguments(
 
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-# 모델, 설정, 데이터를 결합하여 학습기(Trainer) 생성
 trainer = WeightedTrainer(
     model=model,
     args=training_args,
@@ -239,10 +231,8 @@ trainer = WeightedTrainer(
     callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
 )
 
-# 학습 시작
 trainer.train()
 
-# 최종 모델 저장
 save_path = f"./trained_model_{disease}_binary"
 trainer.save_model(save_path)
 tokenizer.save_pretrained(save_path)
@@ -269,7 +259,6 @@ labels = np.array([doc_labels[d] for d in doc_ids_sorted])
 
 print(f"\n(참고: 세션 {len(test_df)}개가 청크 {len(test_doc_ids)}개로 나뉘어 학습/평가에 반영됨)")
 
-# 기본 지표 출력 (정확도, F1-Score 등)
 accuracy = accuracy_score(labels, preds)
 macro_f1 = f1_score(labels, preds, average="macro")
 binary_f1 = f1_score(labels, preds, average="binary")
@@ -279,7 +268,6 @@ print(f"Macro F1: {macro_f1 * 100:.2f}%")
 print(f"Binary F1: {binary_f1 * 100:.2f}%")
 print(classification_report(labels, preds, digits=4))
 print(confusion_matrix(labels, preds))
-
 
 print("\n===== Threshold(임계값) 찾기 =====")
 
