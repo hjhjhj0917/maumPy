@@ -5,7 +5,9 @@ import time
 import requests
 import re
 import base64
-from app.services.tts import synthesize_speech
+from app.services.tts import (
+    synthesize_speech, SENTENCE_CHUNK_PATTERN, strip_emoji_for_tts, strip_markdown_for_tts, split_into_tts_chunks
+)
 
 from datetime import datetime
 from google.auth.transport.requests import Request
@@ -78,44 +80,16 @@ def stream_text(text, delay=0.005):
         yield f"{formatted}\n"
         time.sleep(delay)
 
-# 문장 종결 부호(. ! ?) 또는 줄바꿈 + 그 뒤 공백까지 통째로 한 조각으로 잡아냄.
-# re.split은 구분자 자체(특히 줄바꿈)를 결과에서 없애버려서 문단/목록 구분이 사라지는 문제가 있었기 때문에,
-# 구분자를 버리지 않고 조각 끝에 그대로 남겨두는 findall 방식으로 바꿈
-SENTENCE_CHUNK_PATTERN = re.compile(r'.*?(?:[.!?]+\s*|\n+\s*)|.+$', flags=re.DOTALL)
-
-# TTS로 보내기 전 이모지를 제거하기 위한 패턴 (화면 표시용 텍스트에는 영향 없음)
-EMOJI_PATTERN = re.compile(
-    "["
-    "\U0001F300-\U0001FAFF"  # 이모지 전체 대역 (표정, 사물, 동물, 기호 등)
-    "\U00002600-\U000027BF"  # 기타 기호 및 딩뱃 (☀ ✨ ❤ 등)
-    "\U0001F1E0-\U0001F1FF"  # 국기
-    "\U00002B00-\U00002BFF"  # 화살표/별 등 잡기호
-    "\U0000FE0F"             # variation selector (이모지 렌더링 지시자)
-    "]+",
-    flags=re.UNICODE
-)
-
-
-def strip_emoji_for_tts(text):
-    # TTS 합성용으로만 이모지를 제거하고 앞뒤 공백을 정리함
-    return EMOJI_PATTERN.sub('', text).strip()
-
-
-# 마크다운 기호(굵게, 목록, 헤더)가 그대로 있으면 TTS가 "별표 별표"처럼 읽어버리므로,
-# 화면 표시용 텍스트는 그대로 두고 TTS로 보내기 직전에만 이 함수로 제거함
-MARKDOWN_PATTERN = re.compile(r'\*\*|\*|^#{1,6}\s*|^[-•]\s*', flags=re.MULTILINE)
-
-
-def strip_markdown_for_tts(text):
-    return MARKDOWN_PATTERN.sub('', text).strip()
-
-
 def stream_text_with_audio(text):
     """
-    텍스트는 문장 단위 TTS 합성(네트워크 호출, 문장당 1~2초)을 기다리지 않고 먼저 전부
-    끊김없이 흘려보내고, 그 다음에 문장별 오디오를 순서대로 이어서 전송함.
-    (문장마다 텍스트→오디오를 번갈아 보내면 오디오 합성 대기 때문에 텍스트 출력이
-    문장 단위로 끊겨 보이는 문제가 있어서, 텍스트 전송과 오디오 합성을 분리함)
+    텍스트는 문장 단위로 먼저 전부 끊김없이 흘려보내고, 그 다음에 오디오를 이어서 전송함.
+    (텍스트와 오디오를 번갈아 보내면 오디오 합성 대기 때문에 텍스트 출력이 끊겨 보이는
+    문제가 있어서, 텍스트 전송과 오디오 합성을 분리함)
+
+    오디오는 문장 하나씩 합성하지 않고, split_into_tts_chunks로 Google TTS 요청 한도(5000바이트)
+    안에서 문장을 최대한 묶어 합성함 — 이전에는 문장 단위로 호출 횟수가 너무 많아서, 그중 일부
+    호출이 실패하면(synthesize_speech가 실패 시 None 반환) 그 문장만 조용히 빠져 답변 전체가
+    아니라 일부만 음성으로 나오는 문제가 있었음
     """
     if not text:
         return
@@ -131,12 +105,10 @@ def stream_text_with_audio(text):
     # 오디오 합성 시간만큼 마크다운 적용이 늦어짐
     yield "[[TEXT_DONE]]\n"
 
-    for chunk in chunks:
-        # TTS에는 앞뒤 공백/줄바꿈을 정리하고, 이모지와 마크다운 기호를 제거한 버전만 넘김
-        tts_text = strip_markdown_for_tts(strip_emoji_for_tts(chunk.strip()))
-        if not tts_text:
-            continue
-        audio_bytes = synthesize_speech(tts_text)
+    cleaned = strip_markdown_for_tts(strip_emoji_for_tts(text.strip()))
+
+    for tts_chunk in split_into_tts_chunks(cleaned):
+        audio_bytes = synthesize_speech(tts_chunk)
         if audio_bytes:
             audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
             yield f"[[AUDIO]]{audio_b64}[[/AUDIO]]\n"

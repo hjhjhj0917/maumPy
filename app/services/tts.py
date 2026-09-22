@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import base64
 
 import requests
@@ -8,6 +9,63 @@ from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 
 load_dotenv()
+
+# 문장 종결 부호(. ! ?) 또는 줄바꿈 + 그 뒤 공백까지 통째로 한 조각으로 잡아냄.
+# re.split은 구분자 자체(특히 줄바꿈)를 결과에서 없애버려서 문단/목록 구분이 사라지는 문제가 있었기 때문에,
+# 구분자를 버리지 않고 조각 끝에 그대로 남겨두는 findall 방식으로 씀
+SENTENCE_CHUNK_PATTERN = re.compile(r'.*?(?:[.!?]+\s*|\n+\s*)|.+$', flags=re.DOTALL)
+
+# TTS로 보내기 전 이모지를 제거하기 위한 패턴 (화면 표시용 텍스트에는 영향 없음)
+EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"  # 이모지 전체 대역 (표정, 사물, 동물, 기호 등)
+    "\U00002600-\U000027BF"  # 기타 기호 및 딩뱃 (☀ ✨ ❤ 등)
+    "\U0001F1E0-\U0001F1FF"  # 국기
+    "\U00002B00-\U00002BFF"  # 화살표/별 등 잡기호
+    "\U0000FE0F"             # variation selector (이모지 렌더링 지시자)
+    "]+",
+    flags=re.UNICODE
+)
+
+
+def strip_emoji_for_tts(text):
+    # TTS 합성용으로만 이모지를 제거하고 앞뒤 공백을 정리함
+    return EMOJI_PATTERN.sub('', text).strip()
+
+
+# 마크다운 기호(굵게, 목록, 헤더)가 그대로 있으면 TTS가 "별표 별표"처럼 읽어버리므로,
+# 화면 표시용 텍스트는 그대로 두고 TTS로 보내기 직전에만 이 함수로 제거함
+MARKDOWN_PATTERN = re.compile(r'\*\*|\*|^#{1,6}\s*|^[-•]\s*', flags=re.MULTILINE)
+
+
+def strip_markdown_for_tts(text):
+    return MARKDOWN_PATTERN.sub('', text).strip()
+
+
+# Google Cloud TTS는 요청 하나당 입력 텍스트를 5000바이트(UTF-8)까지만 허용함.
+# 문장 하나씩 따로 합성하면 호출 횟수가 너무 많아지고, 특정 호출이 실패하면 그 문장만
+# 조용히 빠지는(synthesize_speech가 실패 시 None을 반환) 문제가 있어서, 이 바이트 한도
+# 안에서 문장을 최대한 묶어 호출 횟수를 줄이고 응답 전체가 안정적으로 합성되게 함
+_MAX_TTS_CHUNK_BYTES = 4500
+
+
+def split_into_tts_chunks(text: str, max_bytes: int = _MAX_TTS_CHUNK_BYTES) -> list[str]:
+    sentences = [s for s in SENTENCE_CHUNK_PATTERN.findall(text) if s.strip()]
+
+    chunks = []
+    current = ""
+    for sentence in sentences:
+        candidate = current + sentence
+        if current and len(candidate.encode('utf-8')) > max_bytes:
+            chunks.append(current)
+            current = sentence
+        else:
+            current = candidate
+
+    if current.strip():
+        chunks.append(current)
+
+    return chunks
 
 # 서비스 계정 JSON 키의 "내용 전체"를 환경변수 값으로 저장 (.env의 GCP_TTS_CREDENTIALS_JSON)
 GCP_TTS_CREDENTIALS_JSON = os.getenv("GCP_CREDENTIALS_JSON")
