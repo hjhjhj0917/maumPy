@@ -24,6 +24,7 @@ class WeeklyReportResponse(BaseModel):
     comment: str
 
 
+# ★ 즐겨찾기 이후 추가/수정
 @router.post("/api/weekly-report", response_model=WeeklyReportResponse)
 async def weekly_report(request: WeeklyReportRequest):
     try:

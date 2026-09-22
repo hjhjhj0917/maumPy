@@ -54,6 +54,7 @@ _DEFAULT_QUERY = "calm healing pop"
 _token_cache = {"access_token": None, "expires_at": 0}
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _get_fallback_query(main_emotion: str) -> str:
     for query, emotions in _EMOTION_QUERY_GROUPS.items():
         if main_emotion in emotions:
@@ -61,11 +62,13 @@ def _get_fallback_query(main_emotion: str) -> str:
     return _DEFAULT_QUERY
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _get_strong_emotions(raw_emotions: dict, threshold: float = STRONG_EMOTION_THRESHOLD):
     strong = [(emo, prob) for emo, prob in raw_emotions.items() if prob >= threshold]
     return sorted(strong, key=lambda x: x[1], reverse=True)
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _generate_music_query(content: str, strong_emotions: list) -> str:
     """
     일기 원문 + 뚜렷한(0.8 이상) 감정들을 Gemini에게 보여주고, 감정을 그대로 반영하는 게 아니라
@@ -124,6 +127,7 @@ def _generate_music_query(content: str, strong_emotions: list) -> str:
     return query.replace('"', '').replace("'", '').strip()
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _get_spotify_token() -> str:
     if _token_cache["access_token"] and time.time() < _token_cache["expires_at"]:
         return _token_cache["access_token"]
@@ -143,11 +147,13 @@ def _get_spotify_token() -> str:
     return _token_cache["access_token"]
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _is_blocked(item: dict) -> bool:
     text = (item.get("name", "") + " " + item.get("album", {}).get("name", "")).lower()
     return any(keyword.lower() in text for keyword in _BLOCKED_KEYWORDS)
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _search_tracks(query: str, limit: int = RECOMMEND_TRACK_COUNT):
     token = _get_spotify_token()
     headers = {"Authorization": f"Bearer {token}"}
@@ -186,6 +192,7 @@ def _search_tracks(query: str, limit: int = RECOMMEND_TRACK_COUNT):
     return tracks
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def get_music_recommendations(content: str, raw_emotions: dict, main_emotion: str):
     """
     일기 원문 + 0.8 이상으로 뚜렷하게 감지된 감정들을 LLM에게 보여줘서 상황에 맞는 음악

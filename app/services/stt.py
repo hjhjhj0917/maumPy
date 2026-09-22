@@ -21,12 +21,14 @@ _credentials_info = json.loads(GCP_CREDENTIALS_JSON)
 _credentials = service_account.Credentials.from_service_account_info(_credentials_info, scopes=_SCOPES)
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _get_access_token() -> str:
     if not _credentials.valid:
         _credentials.refresh(Request())
     return _credentials.token
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def transcribe_speech(audio_bytes: bytes) -> str:
     """
     브라우저 MediaRecorder가 만든 오디오(webm/opus)를 받아 텍스트로 변환함.

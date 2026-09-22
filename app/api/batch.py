@@ -9,6 +9,7 @@ from scripts.migrate_addresses import migrate as migrate_addr
 router = APIRouter(prefix="/batch", tags=["Batch Jobs"])
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def run_all_data_updates():
     print("--- 백그라운드 데이터 업데이트 시작 ---")
     try:
@@ -21,6 +22,7 @@ def run_all_data_updates():
         # TODO: 슬랙 알림이나 로그 저장 로직 추가 고려
 
 
+# ★ 즐겨찾기 이후 추가/수정
 @router.post("/update-data")
 async def trigger_data_update(background_tasks: BackgroundTasks):
     # 무거운 작업이라 즉시 202를 응답하고 실제 처리는 백그라운드로 넘김

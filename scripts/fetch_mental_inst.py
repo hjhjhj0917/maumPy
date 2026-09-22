@@ -34,6 +34,7 @@ def get_coordinates(address):
         return None
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def fetch_and_save_data():
     print("전체 공공데이터 수집 및 저장을 시작합니다...")
 

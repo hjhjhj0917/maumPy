@@ -21,6 +21,7 @@ db = client[MONGO_DB_NAME]
 collection = db["PUBLIC_SVC"]
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def get_embedding(text):
     if not text or len(text.strip()) == 0:
         return []
@@ -58,6 +59,7 @@ def fetch_service_detail(svc_id):
         return {}
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def fetch_and_save_data():
     print("공공서비스(혜택) 전체 데이터 수집을 시작합니다...")
 

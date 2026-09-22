@@ -23,6 +23,7 @@ torch.cuda.manual_seed_all(SEED)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def preprocess_text(paragraphs):
     sentences = []
     for token in paragraphs:
@@ -46,6 +47,7 @@ CHUNK_MAX_LEN = 480  # [CLS]/[SEP] 특수 토큰 자리(2개)를 남기고 512�
 CHUNK_STRIDE = 50    # 청크 경계에서 문맥이 뚝 끊기는 걸 완화하기 위한 겹침 구간
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def chunk_document(text, tokenizer, max_len=CHUNK_MAX_LEN, stride=CHUNK_STRIDE):
     ids = tokenizer(text, add_special_tokens=False)["input_ids"]
     if not ids:
@@ -63,6 +65,7 @@ def chunk_document(text, tokenizer, max_len=CHUNK_MAX_LEN, stride=CHUNK_STRIDE):
     return chunks
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def build_chunked_dataset(df, tokenizer):
     """
     데이터프레임의 각 문서(세션)를 청크로 쪼개서 Hugging Face Dataset으로 만듦.
@@ -171,6 +174,7 @@ test_dataset.set_format("torch")
 
 # 주의: 여기서 계산하는 지표는 "청크" 단위임(학습 중 매 epoch 조기종료/체크포인트 선택 용도).
 # 진짜 성능(한 세션 전체를 우울증으로 판단했는가)은 학습이 끝난 뒤 문서 단위로 청크를 집계해서 따로 계산함
+# ★ 즐겨찾기 이후 추가/수정
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
     probs = torch.nn.functional.softmax(torch.tensor(logits), dim=-1).numpy()

@@ -5,6 +5,7 @@ import requests
 from app.services.summary import GEMINI_API_URL, _get_access_token
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def generate_weekly_report(diary_entries: list[dict]) -> str:
     """
     최근 일주일 일기 목록(제목/요약/주요감정)을 받아 한 주를 돌아보는 짧은 코멘트를 Gemini로 생성함.

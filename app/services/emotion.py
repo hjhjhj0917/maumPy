@@ -45,6 +45,7 @@ def split_into_chunks(text, window=3, step=2):
     return chunks
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def analyze_emotions(text):
     # 문장을 겹치게(3문장 단위, 2문장씩 이동) 청크로 나누는 이유는 글 전체의 흐름이 끊기지 않게 하기 위함
     chunks = split_into_chunks(text, window=3, step=2)

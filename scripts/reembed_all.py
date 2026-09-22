@@ -20,11 +20,13 @@ from app.services.embedding import generate_embedding, EMBEDDING_MODEL, EMBEDDIN
 REQUEST_DELAY = 2.0
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _already_migrated(doc):
     # 이전 실행에서 이미 새 모델로 성공한 문서는 재시도 시 건너뛰기 위한 체크
     return doc.get("EMBEDDING_MODEL") == EMBEDDING_MODEL and doc.get("EMBEDDING_DIM") == EMBEDDING_DIMENSION
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def reembed_diary_logs():
     collection = db["DIARY_LOGS"]
     documents = list(collection.find({}))
@@ -71,6 +73,7 @@ def reembed_diary_logs():
     print(f"[DIARY_LOGS] 완료 — 성공 {success}건, 실패 {fail}건")
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def reembed_public_svc():
     collection = db["PUBLIC_SVC"]
     documents = list(collection.find({}))
@@ -118,6 +121,7 @@ def reembed_public_svc():
     print(f"[PUBLIC_SVC] 완료 — 성공 {success}건, 실패 {fail}건")
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def reembed_mental_inst():
     collection = db["MENTAL_INST"]
     documents = list(collection.find({}))

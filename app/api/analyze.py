@@ -36,6 +36,7 @@ class DiaryResponse(BaseModel):
     tracks: List[TrackDTO] = []
 
 
+# ★ 즐겨찾기 이후 추가/수정
 @router.post("/api/analyze", response_model=DiaryResponse)
 async def analyze_text(request: DiaryRequest):
     try:

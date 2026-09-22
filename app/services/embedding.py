@@ -37,12 +37,14 @@ _credentials_info = json.loads(GCP_CREDENTIALS_JSON)
 _credentials = service_account.Credentials.from_service_account_info(_credentials_info, scopes=_SCOPES)
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _get_access_token() -> str:
     if not _credentials.valid:
         _credentials.refresh(Request())
     return _credentials.token
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def generate_embedding(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list:
     """
     텍스트를 받아 Google Vertex AI(gemini-embedding-001)로 임베딩 벡터를 생성함
@@ -112,6 +114,7 @@ def generate_embedding(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list
             raise Exception(f"임베딩 생성 실패: {e}")
 
 
+# ★ 즐겨찾기 이후 추가/수정
 # 일기 저장처럼 "문서를 저장하는" 용도이므로 기본 task_type인 RETRIEVAL_DOCUMENT를 그대로 씀
 def generate_diary_embedding(text: str) -> list:
     return generate_embedding(text, task_type="RETRIEVAL_DOCUMENT")

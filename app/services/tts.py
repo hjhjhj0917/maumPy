@@ -28,6 +28,7 @@ EMOJI_PATTERN = re.compile(
 )
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def strip_emoji_for_tts(text):
     # TTS 합성용으로만 이모지를 제거하고 앞뒤 공백을 정리함
     return EMOJI_PATTERN.sub('', text).strip()
@@ -38,6 +39,7 @@ def strip_emoji_for_tts(text):
 MARKDOWN_PATTERN = re.compile(r'\*\*|\*|^#{1,6}\s*|^[-•]\s*', flags=re.MULTILINE)
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def strip_markdown_for_tts(text):
     return MARKDOWN_PATTERN.sub('', text).strip()
 
@@ -49,6 +51,7 @@ def strip_markdown_for_tts(text):
 _MAX_TTS_CHUNK_BYTES = 4500
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def split_into_tts_chunks(text: str, max_bytes: int = _MAX_TTS_CHUNK_BYTES) -> list[str]:
     sentences = [s for s in SENTENCE_CHUNK_PATTERN.findall(text) if s.strip()]
 
@@ -90,12 +93,14 @@ _credentials_info = json.loads(GCP_TTS_CREDENTIALS_JSON)
 _credentials = service_account.Credentials.from_service_account_info(_credentials_info, scopes=_SCOPES)
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _get_access_token() -> str:
     if not _credentials.valid:
         _credentials.refresh(Request())
     return _credentials.token
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def synthesize_speech(text: str) -> bytes | None:
     if not text or not text.strip():
         return None

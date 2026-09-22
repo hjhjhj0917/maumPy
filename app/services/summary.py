@@ -26,12 +26,14 @@ _credentials_info = json.loads(GCP_CREDENTIALS_JSON)
 _credentials = service_account.Credentials.from_service_account_info(_credentials_info, scopes=_SCOPES)
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _get_access_token() -> str:
     if not _credentials.valid:
         _credentials.refresh(Request())
     return _credentials.token
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def generate_diary_summary(content: str, dep_level: int, raw_emotions: dict) -> str:
 
     top_emotions = sorted(raw_emotions.items(), key=lambda x: x[1], reverse=True)[:3]

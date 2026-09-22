@@ -35,6 +35,7 @@ def reset_data_dir():
 # JSON 검증
 # =========================================================
 
+# ★ 즐겨찾기 이후 추가/수정
 def validate_json(js):
 
     if DISEASE not in js:
@@ -70,6 +71,7 @@ def validate_json(js):
 # ZIP 처리
 # =========================================================
 
+# ★ 즐겨찾기 이후 추가/수정
 def extract_and_validate_jsons(source_dir, target_dir):
 
     zip_count = 0

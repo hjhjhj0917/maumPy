@@ -58,6 +58,7 @@ def split_into_chunks(text, window=3, step=2):
     return chunks
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def analyze_diary(content: str, disease_type: str = "depression"):
 
     global sentiment_pipeline

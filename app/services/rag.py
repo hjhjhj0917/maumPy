@@ -32,6 +32,7 @@ _credentials_info = json.loads(GCP_CREDENTIALS_JSON)
 _credentials = service_account.Credentials.from_service_account_info(_credentials_info, scopes=_SCOPES)
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def _get_access_token() -> str:
     if not _credentials.valid:
         _credentials.refresh(Request())
@@ -47,6 +48,7 @@ def safe_text(value):
     return str(value).strip()
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def clean_ai_text(text):
     if not text:
         return ""
@@ -80,6 +82,7 @@ def stream_text(text, delay=0.005):
         yield f"{formatted}\n"
         time.sleep(delay)
 
+# ★ 즐겨찾기 이후 추가/수정
 def stream_text_with_audio(text):
     """
     텍스트는 문장 단위로 먼저 전부 끊김없이 흘려보내고, 그 다음에 오디오를 이어서 전송함.
@@ -113,6 +116,7 @@ def stream_text_with_audio(text):
             audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
             yield f"[[AUDIO]]{audio_b64}[[/AUDIO]]\n"
 
+# ★ 즐겨찾기 이후 추가/수정
 def get_user_context(user_id, user_input=None):
     try:
         try:
@@ -223,6 +227,7 @@ def get_user_context(user_id, user_input=None):
 
 # 정책 / 기관 벡터 검색 (Tool)
 # 반환값: (LLM 프롬프트용 텍스트 컨텍스트, 프론트 카드 렌더링용 구조화 데이터 리스트)
+# ★ 즐겨찾기 이후 추가/수정
 def execute_vector_search(query_text, collection_name):
     try:
         # 검색 질의이므로 RETRIEVAL_QUERY로 임베딩
@@ -284,6 +289,7 @@ def execute_vector_search(query_text, collection_name):
 
 
 # 마스터 시스템 프롬프트 (안전필터 우회 및 팩트 강화)
+# ★ 즐겨찾기 이후 추가/수정
 def build_system_prompt(diary_context, is_daily_talk=False):
     if is_daily_talk:
         return """
@@ -313,6 +319,7 @@ def build_system_prompt(diary_context, is_daily_talk=False):
 
 
 # Tool 정의 (Gemini Function Calling 규격 — JSON Schema 타입은 대문자)
+# ★ 즐겨찾기 이후 추가/수정
 def create_tools():
     return [{
         "functionDeclarations": [
@@ -341,6 +348,7 @@ def create_tools():
 # Spring이 넘겨준 대화 기록(Redis 저장분)을 Gemini contents 형식으로 변환.
 # role은 "user"/"bot"으로 오는데 Gemini는 "user"/"model"을 씀. <think>...</think>는
 # 스트리밍 중 화면에 잠깐 보여주는 안내 문구라 실제 대화 내용이 아니므로 제거하고 넘김
+# ★ 즐겨찾기 이후 추가/수정
 def build_history_contents(history):
     if not history:
         return []
@@ -355,6 +363,7 @@ def build_history_contents(history):
     return contents
 
 
+# ★ 즐겨찾기 이후 추가/수정
 def generate_rag_response_stream(user_id, user_input, history=None):
     try:
         print(f"\n[INFO] RAG PROCESS START")
