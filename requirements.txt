@@ -1,7 +1,9 @@
 fastapi
+pydantic
 uvicorn
 gdown
 --extra-index-url https://download.pytorch.org/whl/cpu
+numpy
 torch
 transformers
 python-dotenv
