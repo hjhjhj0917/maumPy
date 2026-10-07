@@ -20,7 +20,7 @@ class ChatRequest(BaseModel):
 # ★ 즐겨찾기 이후 추가/수정
 @router.post("/api/rag-chat")
 async def process_rag_chat(request: ChatRequest):
-    print(f"[{request.userNo}의 메시지]: {request.message}")
+    print(f"[RAG REQUEST] userNo: {request.userNo}, messageLength: {len(request.message)}, historyCount: {len(request.history)}")
 
     history = [{"role": m.role, "content": m.content} for m in request.history]
 

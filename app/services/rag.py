@@ -367,7 +367,7 @@ def build_history_contents(history):
 def generate_rag_response_stream(user_id, user_input, history=None):
     try:
         print(f"\n[INFO] RAG PROCESS START")
-        print(f"[INFO] User Input: {user_input}")
+        print(f"[INFO] userNo: {user_id}, userInputLength: {len(user_input)}, historyCount: {len(history or [])}")
 
         # 일상 대화인지 판별하여 불필요한 일기 로드를 막음 (안전필터 방지)
         daily_keywords = ["메뉴", "저녁", "점심", "아침", "날씨", "추천해", "안녕", "반가워"]
@@ -377,7 +377,7 @@ def generate_rag_response_stream(user_id, user_input, history=None):
 
         if not is_daily_talk:
             diary_context = get_user_context(user_id, user_input)
-            print(f"[INFO] Retrieved Diary Context:\n{diary_context}\n")
+            print(f"[INFO] Retrieved Diary Context Length: {len(diary_context)}")
         else:
             print("[INFO] Daily talk detected. Skipping diary context retrieval.")
 
@@ -415,12 +415,11 @@ def generate_rag_response_stream(user_id, user_input, history=None):
         response = requests.post(GEMINI_API_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
 
         if response.status_code != 200:
-            print(f"[ERROR] API Code: {response.status_code}, Msg: {response.text}")
+            print(f"[ERROR] API Code: {response.status_code}, Msg: {response.text[:200]}")
             yield from stream_text("서버가 잠시 피곤한가 봐요. 조금만 이따가 다시 이야기해요.")
             return
 
         result_json = response.json()
-        print(f"[INFO] 1st Gemini Response:\n{json.dumps(result_json, indent=2, ensure_ascii=False)}\n")
 
         candidates = result_json.get("candidates", [])
         content_obj = candidates[0].get("content", {}) if candidates else {}
@@ -445,7 +444,7 @@ def generate_rag_response_stream(user_id, user_input, history=None):
                     args = call.get("args", {})  # Gemini는 args를 이미 dict로 줌
                     tool_query = safe_text(args.get("query"))
 
-                    print(f"[INFO] Executing {tool_name} with query: {tool_query}")
+                    print(f"[INFO] Executing {tool_name}, queryLength: {len(tool_query)}")
                     collection_name = "MENTAL_INST" if tool_name == "search_hospital" else "PUBLIC_SVC"
                     search_result, cards = execute_vector_search(tool_query, collection_name)
                     all_cards.extend(cards)
@@ -482,12 +481,11 @@ def generate_rag_response_stream(user_id, user_input, history=None):
 
             if second_res.status_code == 200:
                 second_json = second_res.json()
-                print(f"[INFO] 2nd Gemini Response:\n{json.dumps(second_json, indent=2, ensure_ascii=False)}\n")
                 second_candidates = second_json.get("candidates", [])
                 second_parts = second_candidates[0].get("content", {}).get("parts", []) if second_candidates else []
                 final_content = safe_text("".join(p.get("text", "") for p in second_parts if "text" in p))
             else:
-                print(f"[ERROR] 2nd API Failed: {second_res.status_code}, {second_res.text}")
+                print(f"[ERROR] 2nd API Failed: {second_res.status_code}, {second_res.text[:200]}")
                 final_content = ""
 
             final_content = clean_ai_text(final_content)
