@@ -48,7 +48,12 @@ def strip_markdown_for_tts(text):
 # 문장 하나씩 따로 합성하면 호출 횟수가 너무 많아지고, 특정 호출이 실패하면 그 문장만
 # 조용히 빠지는(synthesize_speech가 실패 시 None을 반환) 문제가 있어서, 이 바이트 한도
 # 안에서 문장을 최대한 묶어 호출 횟수를 줄이고 응답 전체가 안정적으로 합성되게 함
-_MAX_TTS_CHUNK_BYTES = 4500
+_MAX_TTS_CHUNK_BYTES = 2000
+
+# 요청 하나의 응답 대기 시간과 재시도 횟수 (Chirp3-HD는 한 번에 긴 텍스트를 합성하면 느려질 수 있어
+# 청크를 작게 나누고, 그래도 시간이 걸리는 경우를 대비해 타임아웃을 여유 있게 둠)
+_TTS_TIMEOUT_SECONDS = 30
+_TTS_MAX_ATTEMPTS = 2
 
 
 # ★ 즐겨찾기 이후 추가/수정
@@ -125,18 +130,22 @@ def synthesize_speech(text: str) -> bytes | None:
         "audioConfig": audio_config
     }
 
-    try:
-        response = requests.post(TTS_API_URL, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
+    # Chirp3-HD는 긴 텍스트를 합성할 때 10초를 넘기는 경우가 있어 배포 서버에서 Read timed out이
+    # 나는 것을 확인함 — 타임아웃을 늘리고, 일시적인 실패에 대비해 한 번 더 시도함
+    for attempt in range(1, _TTS_MAX_ATTEMPTS + 1):
+        try:
+            response = requests.post(TTS_API_URL, headers=headers, json=payload, timeout=_TTS_TIMEOUT_SECONDS)
+            response.raise_for_status()
 
-        res_data = response.json()
-        audio_content_b64 = res_data.get("audioContent")
+            res_data = response.json()
+            audio_content_b64 = res_data.get("audioContent")
 
-        if not audio_content_b64:
-            raise Exception(f"API 응답에 오디오 데이터가 없습니다. 응답 내용: {res_data}")
+            if not audio_content_b64:
+                raise Exception(f"API 응답에 오디오 데이터가 없습니다. 응답 내용: {res_data}")
 
-        return base64.b64decode(audio_content_b64)
+            return base64.b64decode(audio_content_b64)
 
-    except Exception as e:
-        print(f"[TTS ERROR] 음성 합성 실패: {e}")
-        return None
+        except Exception as e:
+            print(f"[TTS ERROR] 음성 합성 실패 (시도 {attempt}/{_TTS_MAX_ATTEMPTS}): {e}")
+
+    return None
