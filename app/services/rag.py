@@ -108,7 +108,7 @@ def stream_text_with_audio(text):
     # 오디오 합성 시간만큼 마크다운 적용이 늦어짐
     yield "[[TEXT_DONE]]\n"
 
-    cleaned = strip_markdown_for_tts(strip_emoji_for_tts(text.strip()))
+    cleaned = strip_markdown_for_tts(strip_emoji_for_tts(text))
 
     for tts_chunk in split_into_tts_chunks(cleaned):
         audio_bytes = synthesize_speech(tts_chunk)
