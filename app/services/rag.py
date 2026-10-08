@@ -288,33 +288,25 @@ def execute_vector_search(query_text, collection_name):
         return "데이터베이스 검색 중 오류가 발생했습니다.", []
 
 
-# 마스터 시스템 프롬프트 (안전필터 우회 및 팩트 강화)
+# 마스터 시스템 프롬프트
+# 일기/정책/기관 정보는 미리 붙이지 않고, 필요할 때 모델이 도구(search_diary 등)를 호출해서 가져옴
 # ★ 즐겨찾기 이후 추가/수정
-def build_system_prompt(diary_context, is_daily_talk=False):
-    if is_daily_talk:
-        return """
-당신은 사용자와 편안하게 일상을 나누는 다정하고 따뜻한 챗봇 '마음'입니다.
+def build_system_prompt():
+    return """
+당신은 사용자의 일상과 고민을 공감하며 따뜻하게 대화하는 챗봇 '마음'입니다.
+
+[도구 사용 원칙]
+1. 사용자가 자신의 감정/기분/최근 일상/과거 일기에 대해 이야기하거나 물을 때만 search_diary를 호출하세요.
+2. 인사, 메뉴 추천, 날씨 같은 가벼운 일상 대화에는 도구를 호출하지 말고 바로 대답하세요.
+3. 정책/지원금/복지 혜택을 찾으면 search_welfare, 병원/상담센터/정신건강 기관을 찾으면 search_hospital을 호출하세요.
 
 [대화 원칙]
-1. 사용자의 일상적인 질문(메뉴 추천, 날씨, 안부 등)에 상식과 공감 능력을 발휘하여 자연스럽고 친절하게 추천 및 대답해 주세요.
-2. 말투는 "~해요", "~군요", "~어떨까요?" 처럼 친근하고 부드럽게 사용하세요.
-3. 기계적인 답변을 피하고 친한 친구처럼 대화하세요.
-4. 여러 개를 추천하거나 나열할 때는 한 문장에 몰아넣지 말고 줄바꿈(마크다운 목록 "- ")으로 항목을 나눠서 한눈에 보이게 해주세요.
-"""
-    else:
-        return f"""
-당신은 사용자의 고민을 공감하고 따뜻하게 대화하는 챗봇 '마음'입니다.
-
-[참고 정보: 사용자의 과거 기록 및 검색된 정책/기관]
-{diary_context if diary_context else "참고할 기록이 없습니다."}
-
-[대화 원칙]
-1. 사용자의 질문이 정책/기관 정보를 찾는 것이라면 검색된 정보를 바탕으로 바로 답하고, 사용자의 감정이나 최근 일상에 대한 질문이 아니라면 과거 일기 내용을 억지로 끌어와 언급하지 마세요.
-2. 정보가 없다면 억지로 지어내지 말고, "해당 내용에 대해서는 찾을 수 없네요"라고 솔직하게 말하며 공감해 주세요.
-3. 사용자가 자신의 감정/기분/최근 일상을 묻거나 이야기할 때만, 관련된 과거 일기 내용을 "기록을 보니 ~하셨군요"처럼 자연스럽게 언급해 주세요. 질문과 무관한 일기 내용을 먼저 꺼내지 마세요.
-4. 말투는 "~해요", "~군요" 처럼 친근하게 사용하고, 전문적인 심리 상담이나 섣부른 진단은 절대 하지 마세요.
+1. 검색된 정보가 있으면 그것을 바탕으로 답하고, 정보가 없다면 억지로 지어내지 말고 "해당 내용에 대해서는 찾을 수 없네요"라고 솔직하게 말하며 공감해 주세요.
+2. 일기 내용은 사용자가 감정/기분/최근 일상을 묻거나 이야기할 때만 "기록을 보니 ~하셨군요"처럼 자연스럽게 언급하세요. 질문과 무관한 일기 내용을 먼저 꺼내지 마세요.
+3. 말투는 "~해요", "~군요", "~어떨까요?" 처럼 친근하고 부드럽게 사용하고, 친한 친구처럼 기계적이지 않게 대화하세요.
+4. 전문적인 심리 상담이나 섣부른 진단은 절대 하지 마세요.
 5. 절대로 <꺽쇠 괄호>를 사용하지 마세요.
-6. 서로 다른 생각이나 화제로 넘어갈 때는 빈 줄로 문단을 나누고, 핵심 단어는 **굵게** 표시해서 한눈에 들어오게 해주세요. 여러 항목을 나열할 때는 "- "로 시작하는 목록을 쓰세요.
+6. 서로 다른 생각이나 화제로 넘어갈 때는 빈 줄로 문단을 나누고, 핵심 단어는 **굵게** 표시해서 한눈에 들어오게 해주세요. 여러 개를 추천하거나 나열할 때는 한 문장에 몰아넣지 말고 "- "로 시작하는 목록으로 나눠 주세요.
 """
 
 
@@ -323,6 +315,15 @@ def build_system_prompt(diary_context, is_daily_talk=False):
 def create_tools():
     return [{
         "functionDeclarations": [
+            {
+                "name": "search_diary",
+                "description": "사용자가 자신의 감정, 기분, 최근 일상, 과거에 쓴 일기에 대해 이야기하거나 물을 때 사용자의 일기 기록을 검색합니다. 인사나 메뉴 추천 같은 가벼운 일상 대화에는 호출하지 않습니다.",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {"query": {"type": "STRING"}},
+                    "required": ["query"]
+                }
+            },
             {
                 "name": "search_welfare",
                 "description": "사용자가 월세, 생활비, 지원금, 복지 혜택 등을 찾을 때 정책을 검색합니다.",
@@ -369,20 +370,10 @@ def generate_rag_response_stream(user_id, user_input, history=None):
         print(f"\n[INFO] RAG PROCESS START")
         print(f"[INFO] userNo: {user_id}, userInputLength: {len(user_input)}, historyCount: {len(history or [])}")
 
-        # 일상 대화인지 판별하여 불필요한 일기 로드를 막음 (안전필터 방지)
-        daily_keywords = ["메뉴", "저녁", "점심", "아침", "날씨", "추천해", "안녕", "반가워"]
-        is_daily_talk = any(keyword in user_input for keyword in daily_keywords)
-
-        diary_context = ""
-
-        if not is_daily_talk:
-            diary_context = get_user_context(user_id, user_input)
-            print(f"[INFO] Retrieved Diary Context Length: {len(diary_context)}")
-        else:
-            print("[INFO] Daily talk detected. Skipping diary context retrieval.")
-
+        # 일기는 미리 불러오지 않고, 모델이 필요하다고 판단할 때만 search_diary 도구로 가져옴
+        # (인사 같은 가벼운 대화에 일기를 같이 보내 안전필터에 걸리는 것을 막으면서, 키워드 판별의 오판도 피함)
         # 분리된 시스템 프롬프트 적용 (Gemini는 system을 systemInstruction으로 별도 분리)
-        system_prompt = build_system_prompt(diary_context, is_daily_talk)
+        system_prompt = build_system_prompt()
 
         contents = build_history_contents(history) + [
             {"role": "user", "parts": [{"text": user_input}]}
@@ -398,7 +389,7 @@ def generate_rag_response_stream(user_id, user_input, history=None):
             "contents": contents,
             "generationConfig": {
                 "topP": 0.8,
-                "temperature": 0.7 if is_daily_talk else 0.4,  # 일상 대화일 때는 창의성을 살짝 높임
+                "temperature": 0.5,
                 "maxOutputTokens": 1024,
                 # gemini-2.5-flash는 기본적으로 답변 전에 내부적으로 "생각(thinking)" 토큰을 쓰는데,
                 # 이 토큰이 maxOutputTokens 예산을 같이 잡아먹어서 정작 답변이 잘리는 문제가 있었음.
@@ -407,9 +398,8 @@ def generate_rag_response_stream(user_id, user_input, history=None):
             }
         }
 
-        if not is_daily_talk:
-            payload["tools"] = create_tools()
-            payload["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}
+        payload["tools"] = create_tools()
+        payload["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}
 
         print("[INFO] Requesting 1st Gemini API (Tool or Direct Answer)...")
         response = requests.post(GEMINI_API_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
@@ -445,8 +435,12 @@ def generate_rag_response_stream(user_id, user_input, history=None):
                     tool_query = safe_text(args.get("query"))
 
                     print(f"[INFO] Executing {tool_name}, queryLength: {len(tool_query)}")
-                    collection_name = "MENTAL_INST" if tool_name == "search_hospital" else "PUBLIC_SVC"
-                    search_result, cards = execute_vector_search(tool_query, collection_name)
+                    if tool_name == "search_diary":
+                        # 일기 검색은 카드 없이 텍스트 컨텍스트만 모델에게 전달
+                        search_result, cards = get_user_context(user_id, tool_query or user_input), []
+                    else:
+                        collection_name = "MENTAL_INST" if tool_name == "search_hospital" else "PUBLIC_SVC"
+                        search_result, cards = execute_vector_search(tool_query, collection_name)
                     all_cards.extend(cards)
                     print(f"[INFO] Tool Result Length: {len(search_result)}, Cards: {len(cards)}")
 
@@ -463,7 +457,8 @@ def generate_rag_response_stream(user_id, user_input, history=None):
             contents.append({"role": "user", "parts": function_response_parts})
 
             # 카드로 상세 정보를 이미 보여주므로, 답변 텍스트는 짧은 안내 멘트 정도로만 작성하도록 지시
-            card_aware_prompt = system_prompt + "\n\n[안내]\n방금 찾은 정책/기관의 상세 정보(이름, 대상, 연락처 등)는 화면에 카드로 따로 표시됩니다. 답변에서는 상세 항목을 나열하지 말고, \"이런 것들을 찾았어요\"처럼 1~2문장으로 짧게 안내만 해주세요."
+            # (일기 검색만 한 경우에는 카드가 없으므로 기본 프롬프트를 그대로 사용)
+            card_aware_prompt = system_prompt + ("\n\n[안내]\n방금 찾은 정책/기관의 상세 정보(이름, 대상, 연락처 등)는 화면에 카드로 따로 표시됩니다. 답변에서는 상세 항목을 나열하지 말고, \"이런 것들을 찾았어요\"처럼 1~2문장으로 짧게 안내만 해주세요." if all_cards else "")
 
             second_payload = {
                 "systemInstruction": {"parts": [{"text": card_aware_prompt}]},
