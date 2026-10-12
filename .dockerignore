@@ -9,9 +9,12 @@
 .env
 .env.*
 
-# 런타임에 쓰이지 않는 학습/데이터 수집 스크립트와 백업 파일
-scripts/
-models/*.zip
+# scripts/*.py는 app/api/batch.py가 import하므로 포함하고, 용량이 큰 데이터 폴더만 제외
+scripts/data/
+scripts/__pycache__/
+
+# 학습한 모델은 이미지에 담지 않고 서버 폴더를 /app/models로 마운트해서 사용
+models/
 
 __pycache__/
 *.pyc
