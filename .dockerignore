@@ -1,0 +1,18 @@
+.git
+.gitignore
+.idea
+.claude
+.venv
+*.iml
+
+# 비밀값은 이미지에 포함하지 않음 (서버에서 환경변수로 주입)
+.env
+.env.*
+
+# 런타임에 쓰이지 않는 학습/데이터 수집 스크립트와 백업 파일
+scripts/
+models/*.zip
+
+__pycache__/
+*.pyc
+README.md
