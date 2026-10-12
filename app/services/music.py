@@ -170,7 +170,7 @@ def _search_tracks(query: str, limit: int = RECOMMEND_TRACK_COUNT) -> list[dict]
 
     tracks = []
     seen = set()  # (곡명, 아티스트) 기준 중복 제거 - 같은 곡이 리마스터/라이브 버전 등으로
-                  # 트랙 ID만 다르게 여러 개 올라와 있어서 그대로 두면 같은 곡이 중복 추천됨
+    # 트랙 ID만 다르게 여러 개 올라와 있어서 그대로 두면 같은 곡이 중복 추천됨
     for item in items:
         key = (item["name"].strip().lower(), tuple(a["name"] for a in item.get("artists", [])))
         if key in seen:

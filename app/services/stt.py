@@ -47,7 +47,7 @@ def transcribe_speech(audio_bytes: bytes) -> str:
         "config": {
             "encoding": "WEBM_OPUS",
             "languageCode": STT_LANGUAGE_CODE,
-            "enableAutomaticPunctuation": True
+            "enableAutomaticPunctuation": True # 자동 구두점
         },
         "audio": {
             "content": base64.b64encode(audio_bytes).decode('utf-8')
@@ -56,8 +56,10 @@ def transcribe_speech(audio_bytes: bytes) -> str:
 
     try:
         response = requests.post(STT_API_URL, headers=headers, json=payload, timeout=15)
+        # 4xx, 5xx 에러시 발생
         response.raise_for_status()
 
+        # 딕셔너리 타입으로 변경 .json
         res_data = response.json()
         results = res_data.get("results", [])
 
