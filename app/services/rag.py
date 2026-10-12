@@ -5,6 +5,7 @@ import time
 import requests
 import re
 import base64
+from typing import Iterator
 from app.services.tts import (
     synthesize_speech, SENTENCE_CHUNK_PATTERN, strip_emoji_for_tts, strip_markdown_for_tts, split_into_tts_chunks
 )
@@ -42,14 +43,14 @@ def _get_access_token() -> str:
 REQUEST_TIMEOUT = 30
 
 
-def safe_text(value):
+def safe_text(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
 
 
 # ★ 즐겨찾기 이후 추가/수정
-def clean_ai_text(text):
+def clean_ai_text(text: str | None) -> str:
     if not text:
         return ""
     # AI가 강조를 위해 사용하는 <내용> 괄호 자체를 제거 (내용은 유지)
@@ -73,7 +74,7 @@ def clean_ai_text(text):
     return text.strip()
 
 
-def stream_text(text, delay=0.005):
+def stream_text(text: str, delay: float = 0.005) -> Iterator[str]:
     if not text:
         return
 
@@ -83,7 +84,7 @@ def stream_text(text, delay=0.005):
         time.sleep(delay)
 
 # ★ 즐겨찾기 이후 추가/수정
-def stream_text_with_audio(text):
+def stream_text_with_audio(text: str) -> Iterator[str]:
     """
     텍스트는 문장 단위로 먼저 전부 끊김없이 흘려보내고, 그 다음에 오디오를 이어서 전송함.
     (텍스트와 오디오를 번갈아 보내면 오디오 합성 대기 때문에 텍스트 출력이 끊겨 보이는
@@ -117,7 +118,7 @@ def stream_text_with_audio(text):
             yield f"[[AUDIO]]{audio_b64}[[/AUDIO]]\n"
 
 # ★ 즐겨찾기 이후 추가/수정
-def get_user_context(user_id, user_input=None):
+def get_user_context(user_id: str, user_input: str | None = None) -> str:
     try:
         try:
             user_no = int(user_id)
@@ -228,7 +229,7 @@ def get_user_context(user_id, user_input=None):
 # 정책 / 기관 벡터 검색 (Tool)
 # 반환값: (LLM 프롬프트용 텍스트 컨텍스트, 프론트 카드 렌더링용 구조화 데이터 리스트)
 # ★ 즐겨찾기 이후 추가/수정
-def execute_vector_search(query_text, collection_name):
+def execute_vector_search(query_text: str, collection_name: str) -> tuple[str, list[dict]]:
     try:
         # 검색 질의이므로 RETRIEVAL_QUERY로 임베딩
         query_vector = generate_embedding(query_text, task_type="RETRIEVAL_QUERY")
@@ -291,7 +292,7 @@ def execute_vector_search(query_text, collection_name):
 # 마스터 시스템 프롬프트
 # 일기/정책/기관 정보는 미리 붙이지 않고, 필요할 때 모델이 도구(search_diary 등)를 호출해서 가져옴
 # ★ 즐겨찾기 이후 추가/수정
-def build_system_prompt():
+def build_system_prompt() -> str:
     return """
 당신은 사용자의 일상과 고민을 공감하며 따뜻하게 대화하는 챗봇 '마음'입니다.
 
@@ -312,7 +313,7 @@ def build_system_prompt():
 
 # Tool 정의 (Gemini Function Calling 규격 — JSON Schema 타입은 대문자)
 # ★ 즐겨찾기 이후 추가/수정
-def create_tools():
+def create_tools() -> list[dict]:
     return [{
         "functionDeclarations": [
             {
@@ -350,7 +351,7 @@ def create_tools():
 # role은 "user"/"bot"으로 오는데 Gemini는 "user"/"model"을 씀. <think>...</think>는
 # 스트리밍 중 화면에 잠깐 보여주는 안내 문구라 실제 대화 내용이 아니므로 제거하고 넘김
 # ★ 즐겨찾기 이후 추가/수정
-def build_history_contents(history):
+def build_history_contents(history: list[dict] | None) -> list[dict]:
     if not history:
         return []
 
@@ -365,7 +366,7 @@ def build_history_contents(history):
 
 
 # ★ 즐겨찾기 이후 추가/수정
-def generate_rag_response_stream(user_id, user_input, history=None):
+def generate_rag_response_stream(user_id: str, user_input: str, history: list[dict] | None = None) -> Iterator[str]:
     try:
         print(f"\n[INFO] RAG PROCESS START")
         print(f"[INFO] userNo: {user_id}, userInputLength: {len(user_input)}, historyCount: {len(history or [])}")

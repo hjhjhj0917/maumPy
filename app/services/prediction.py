@@ -35,7 +35,7 @@ except Exception as e:
     tokenizers = {}
 
 
-def get_analysis_summary(final_level):
+def get_analysis_summary(final_level: int) -> str:
     summary_map = {
         0: "정상 범위 내의 정서 상태",
         1: "우울 증상 의심 및 전문가 상담 권장"
@@ -43,7 +43,7 @@ def get_analysis_summary(final_level):
     return summary_map.get(final_level, "분석 결과 없음")
 
 
-def split_into_chunks(text, window=3, step=2):
+def split_into_chunks(text: str, window: int = 3, step: int = 2) -> list[str]:
     sentences = re.split(r'(?<=[.!?\n])\s+', text.strip())
     sentences = [s.strip() for s in sentences if s.strip()]
     if not sentences:
@@ -59,7 +59,7 @@ def split_into_chunks(text, window=3, step=2):
 
 
 # ★ 즐겨찾기 이후 추가/수정
-def analyze_diary(content: str, disease_type: str = "depression"):
+def analyze_diary(content: str, disease_type: str = "depression") -> dict:
 
     global sentiment_pipeline
     global models

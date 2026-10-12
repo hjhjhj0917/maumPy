@@ -63,7 +63,7 @@ def _get_fallback_query(main_emotion: str) -> str:
 
 
 # ★ 즐겨찾기 이후 추가/수정
-def _get_strong_emotions(raw_emotions: dict, threshold: float = STRONG_EMOTION_THRESHOLD):
+def _get_strong_emotions(raw_emotions: dict, threshold: float = STRONG_EMOTION_THRESHOLD) -> list[tuple[str, float]]:
     strong = [(emo, prob) for emo, prob in raw_emotions.items() if prob >= threshold]
     return sorted(strong, key=lambda x: x[1], reverse=True)
 
@@ -154,7 +154,7 @@ def _is_blocked(item: dict) -> bool:
 
 
 # ★ 즐겨찾기 이후 추가/수정
-def _search_tracks(query: str, limit: int = RECOMMEND_TRACK_COUNT):
+def _search_tracks(query: str, limit: int = RECOMMEND_TRACK_COUNT) -> list[dict]:
     token = _get_spotify_token()
     headers = {"Authorization": f"Bearer {token}"}
     # 인기도/키즈 콘텐츠 필터링을 거치고도 limit장이 남도록 넉넉히 받아옴
@@ -193,7 +193,7 @@ def _search_tracks(query: str, limit: int = RECOMMEND_TRACK_COUNT):
 
 
 # ★ 즐겨찾기 이후 추가/수정
-def get_music_recommendations(content: str, raw_emotions: dict, main_emotion: str):
+def get_music_recommendations(content: str, raw_emotions: dict, main_emotion: str) -> list[dict]:
     """
     일기 원문 + 0.8 이상으로 뚜렷하게 감지된 감정들을 LLM에게 보여줘서 상황에 맞는 음악
     분위기 키워드를 판단하게 하고, 그 키워드로 Spotify에서 곡을 검색함.

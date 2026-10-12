@@ -30,7 +30,7 @@ model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME).to(DEVICE
 model.eval()
 
 
-def split_into_chunks(text, window=3, step=2):
+def split_into_chunks(text: str, window: int = 3, step: int = 2) -> list[str]:
     sentences = re.split(r'(?<=[.!?\n])\s+', text.strip())
     sentences = [s.strip() for s in sentences if s.strip()]
     if not sentences:
@@ -46,7 +46,7 @@ def split_into_chunks(text, window=3, step=2):
 
 
 # ★ 즐겨찾기 이후 추가/수정
-def analyze_emotions(text):
+def analyze_emotions(text: str) -> dict:
     # 문장을 겹치게(3문장 단위, 2문장씩 이동) 청크로 나누는 이유는 글 전체의 흐름이 끊기지 않게 하기 위함
     chunks = split_into_chunks(text, window=3, step=2)
     all_probs = []

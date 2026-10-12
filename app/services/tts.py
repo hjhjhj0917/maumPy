@@ -29,7 +29,7 @@ EMOJI_PATTERN = re.compile(
 
 
 # ★ 즐겨찾기 이후 추가/수정
-def strip_emoji_for_tts(text):
+def strip_emoji_for_tts(text: str) -> str:
     # TTS 합성용으로만 이모지를 제거하고 앞뒤 공백을 정리함
     return EMOJI_PATTERN.sub('', text).strip()
 
@@ -40,7 +40,7 @@ MARKDOWN_PATTERN = re.compile(r'\*\*|\*|^#{1,6}\s*|^[-•]\s*', flags=re.MULTILI
 
 
 # ★ 즐겨찾기 이후 추가/수정
-def strip_markdown_for_tts(text):
+def strip_markdown_for_tts(text: str) -> str:
     return MARKDOWN_PATTERN.sub('', text).strip()
 
 
