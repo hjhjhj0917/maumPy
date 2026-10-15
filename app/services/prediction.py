@@ -1,7 +1,10 @@
 import torch
 import os
 import re
+from dotenv import load_dotenv
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
+
+load_dotenv()
 
 SENTIMENT_MODEL_NAME = os.getenv("SENTIMENT_MODEL_NAME", "nlptown/bert-base-multilingual-uncased-sentiment")
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
