@@ -1,0 +1,28 @@
+# 직접 사용하는 패키지만 적는 파일. 버전 고정과 하위 의존성은 requirements.txt(자동 생성)가 담당한다.
+#
+# 재생성 (버전을 그대로 두고 목록만 갱신):
+#   uv pip compile requirements.in -o requirements.txt --python-version 3.10 --python-platform x86_64-unknown-linux-gnu --index-strategy unsafe-best-match --emit-index-url
+# 버전을 올리고 싶을 때는 위 명령에 --upgrade(전체) 또는 --upgrade-package <이름>(일부)을 붙인다.
+# 배포 이미지(python:3.10-slim, Linux)와 같은 환경 기준이라 Windows 전용 패키지는 lock에 적히지 않고, 설치할 때 pip가 자동으로 추가한다.
+#
+# torch는 CPU 전용 빌드(+cpu)를 쓰기 위해 아래 추가 저장소가 필요하다.
+# PyPI의 기본 torch는 CUDA 의존 패키지까지 받아 이미지가 매우 커진다.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# 웹 서버
+fastapi
+uvicorn
+pydantic
+python-multipart  # 음성 파일 업로드(UploadFile) 처리에 필요
+
+# AI 모델
+torch
+transformers
+numpy
+
+# DB, 환경변수, HTTP, Google 인증
+# (Gemini, TTS, STT는 전용 클라이언트가 아니라 REST 호출이라 google-auth와 requests만 쓴다)
+pymongo
+python-dotenv
+requests
+google-auth
